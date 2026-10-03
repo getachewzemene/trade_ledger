@@ -121,20 +121,125 @@ function renderVolumeProfileTopic(heading, index) {
     return `<rect x="${470 - width}" y="${y}" width="${width}" height="9" fill="${isPoc ? '#A88948' : inValue ? '#1F5C3E' : '#7D766D'}" opacity="${isPoc ? 1 : 0.75}"/>`;
   }).join('');
   const tag = /node|lVN|thin/i.test(heading) ? 'LVN: thinner trade, faster traversal possible' : /poc/i.test(heading) ? 'POC: most volume in this selected profile' : 'VAH / VAL: selected value-area boundaries';
-  return svgFrame(`Volume profile schematic: ${heading}`, `<line x1="470" y1="42" x2="470" y2="174" stroke="#D8D3C3"/>${bars}<line x1="250" y1="99" x2="685" y2="99" stroke="#A88948" stroke-dasharray="4 3"/><text x="478" y="102" fill="#A88948" font-size="10">POC</text><path d="M110 158 L180 134 L230 143 L280 112 L335 122 L390 86 L440 95" fill="none" stroke="#1A1816" stroke-width="2.5"/><text x="24" y="181" fill="#4A453F" font-size="10">${tag} · schematic, not live market data</text>`);
+  const priceLevels = [
+    { y: 80, text: 'VAH 2336' },
+    { y: 95, text: 'POC 2330' },
+    { y: 125, text: 'VAL 2324' }
+  ].map(level => `<line x1="220" y1="${level.y}" x2="690" y2="${level.y}" stroke="#A88948" stroke-dasharray="4 3"/><text x="480" y="${level.y - 3}" fill="#A88948" font-size="10">${level.text}</text>`).join('');
+  return svgFrame(`Hypothetical GC session profile: ${heading}`, `<text x="24" y="40" fill="#4A453F" font-size="10">Illustrative USD/oz levels · relative profile volume</text><line x1="470" y1="42" x2="470" y2="174" stroke="#D8D3C3"/>${bars}${priceLevels}<path d="M110 158 L180 134 L230 143 L280 112 L335 122 L390 86 L440 95" fill="none" stroke="#1A1816" stroke-width="2.5"/><text x="24" y="181" fill="#4A453F" font-size="10">${tag} · hypothetical only, not live market data</text>`);
 }
 
-function renderFibonacciTopic(heading, index) {
-  const bearish = index % 2 === 1 || /bearish|short|high down/i.test(heading);
-  const levels = [
-    ['0%', 54], ['38.2%', 86], ['50%', 104], ['61.8%', 124], ['70.5%', 139], ['78.6%', 155], ['100%', 176]
-  ];
-  const chart = levels.map(([label, y]) => {
-    const ote = ['61.8%', '70.5%', '78.6%'].includes(label);
-    return `${ote ? `<rect x="92" y="${y - 7}" width="560" height="14" fill="#E4EFE8" opacity="0.9"/>` : ''}<line x1="92" y1="${y}" x2="650" y2="${y}" stroke="${ote ? '#1F5C3E' : '#7D766D'}" stroke-dasharray="${ote ? '0' : '3 4'}"/><text x="660" y="${y + 4}" fill="${ote ? '#1F5C3E' : '#7D766D'}" font-size="10">${label}</text>`;
+const BULLISH_FIB_CANDLES = [
+  [2303, 2308, 2300, 2306], [2306, 2312, 2304, 2310], [2310, 2318, 2308, 2316],
+  [2316, 2320, 2312, 2318], [2318, 2325, 2317, 2323], [2323, 2330, 2321, 2328],
+  [2328, 2335, 2327, 2333], [2333, 2340, 2332, 2338], [2338, 2340, 2330, 2332],
+  [2332, 2334, 2320, 2324], [2324, 2326, 2307.5, 2310], [2310, 2317, 2309, 2315],
+  [2315, 2320, 2313, 2319]
+];
+
+const BEARISH_FIB_CANDLES = [
+  [2338, 2340, 2332, 2334], [2334, 2336, 2328, 2330], [2330, 2332, 2323, 2325],
+  [2325, 2328, 2319, 2321], [2321, 2323, 2314, 2316], [2316, 2318, 2308, 2310],
+  [2310, 2312, 2302, 2304], [2304, 2306, 2300, 2302], [2302, 2314, 2301, 2311],
+  [2311, 2324, 2309, 2321], [2321, 2331, 2318, 2329], [2329, 2330, 2319, 2322],
+  [2322, 2324, 2311, 2314]
+];
+
+function fibPriceY(price) {
+  const chartTop = 54;
+  const chartBottom = 190;
+  return chartBottom - ((price - 2298) / 44) * (chartBottom - chartTop);
+}
+
+function drawPriceCandles(candles) {
+  const startX = 78;
+  const spacing = 31;
+  return candles.map(([open, high, low, close], index) => {
+    const x = startX + index * spacing;
+    const color = close >= open ? '#1F5C3E' : '#8F251E';
+    const openY = fibPriceY(open);
+    const closeY = fibPriceY(close);
+    const bodyY = Math.min(openY, closeY);
+    const bodyHeight = Math.max(2, Math.abs(openY - closeY));
+    return `<line x1="${x}" y1="${fibPriceY(high)}" x2="${x}" y2="${fibPriceY(low)}" stroke="${color}" stroke-width="2"/><rect x="${x - 6}" y="${bodyY}" width="12" height="${bodyHeight}" fill="${color}"/>`;
   }).join('');
-  const path = bearish ? 'M150 45 L310 82 L405 110 L500 142 L600 172 L530 143 L470 126' : 'M150 174 L310 136 L405 108 L500 78 L600 45 L530 78 L470 96';
-  return svgFrame(`Retracement and OTE zone: ${heading}`, `${chart}<path d="${path}" fill="none" stroke="#1A1816" stroke-width="3"/><circle cx="470" cy="${bearish ? 126 : 96}" r="5" fill="#A88948"/><text x="112" y="34" fill="#4A453F" font-size="10">impulse anchors fixed before retracement</text><text x="390" y="169" fill="#1F5C3E" font-size="10">OTE is a zone, not an entry signal</text>`);
+}
+
+function fibLevelMarks(direction = 'bullish') {
+  const levels = direction === 'bullish'
+    ? [['0%', 2340], ['38.2%', 2324.72], ['50%', 2320], ['61.8%', 2315.28], ['70.5%', 2311.8], ['78.6%', 2308.56], ['100%', 2300]]
+    : [['0%', 2300], ['38.2%', 2315.28], ['50%', 2320], ['61.8%', 2324.72], ['70.5%', 2328.2], ['78.6%', 2331.44], ['100%', 2340]];
+  return levels.map(([label, price]) => {
+    const y = fibPriceY(price);
+    const isOte = ['61.8%', '70.5%', '78.6%'].includes(label);
+    return `${isOte ? `<rect x="55" y="${y - 6}" width="462" height="12" fill="#E4EFE8" opacity="0.65"/>` : ''}<line x1="55" y1="${y}" x2="518" y2="${y}" stroke="${isOte ? '#1F5C3E' : '#7D766D'}" stroke-width="${isOte ? 1.3 : 1}" stroke-dasharray="${isOte ? '0' : '4 4'}"/><text x="527" y="${y + 3}" fill="${isOte ? '#1F5C3E' : '#7D766D'}" font-family="monospace" font-size="9">${label}  ${Number(price).toFixed(2)}</text>`;
+  }).join('');
+}
+
+function renderFibPriceChart(heading, variant = 'levels', direction = 'bullish') {
+  const candles = direction === 'bearish' ? BEARISH_FIB_CANDLES : BULLISH_FIB_CANDLES;
+  const startPrice = direction === 'bearish' ? 2340 : 2300;
+  const endPrice = direction === 'bearish' ? 2300 : 2340;
+  const startX = direction === 'bearish' ? 78 : 78;
+  const endX = startX + 7 * 31;
+  const startY = fibPriceY(startPrice);
+  const endY = fibPriceY(endPrice);
+  let overlays = '';
+
+  if (variant === 'anchors') {
+    overlays = `<circle cx="${startX}" cy="${startY}" r="5" fill="#A88948"/><text x="55" y="${startY + 18}" fill="#A88948" font-size="9">fixed swing anchor ${startPrice}</text><circle cx="${endX}" cy="${endY}" r="5" fill="#A88948"/><text x="${endX - 8}" y="${endY - 9}" fill="#A88948" font-size="9">impulse close beyond swing ${endPrice}</text>`;
+  } else if (variant === 'confluence') {
+    const pocY = fibPriceY(2312);
+    overlays = `<line x1="55" y1="${pocY}" x2="518" y2="${pocY}" stroke="#397189" stroke-width="2" stroke-dasharray="5 3"/><text x="278" y="${pocY - 5}" fill="#397189" font-size="9">separate hypothetical POC 2312.00</text><circle cx="418" cy="${pocY}" r="5" fill="#A88948"/>`;
+  } else if (variant === 'execution') {
+    const entry = direction === 'bearish' ? 2322 : 2314;
+    const stop = direction === 'bearish' ? 2332 : 2307;
+    const target = direction === 'bearish' ? 2302 : 2328;
+    overlays = [
+      [target, '#1F5C3E', `TARGET ${target.toFixed(2)}`],
+      [entry, '#397189', `ENTRY ${entry.toFixed(2)}`],
+      [stop, '#8F251E', `STOP ${stop.toFixed(2)}`]
+    ].map(([price, color, label]) => `<line x1="55" y1="${fibPriceY(price)}" x2="518" y2="${fibPriceY(price)}" stroke="${color}" stroke-width="2"/><text x="526" y="${fibPriceY(price) - 4}" fill="${color}" font-size="9">${label}</text>`).join('');
+  }
+
+  const oteStart = direction === 'bearish' ? 2324.72 : 2315.28;
+  const oteEnd = direction === 'bearish' ? 2331.44 : 2308.56;
+  const fibLines = variant === 'execution'
+    ? `<rect x="55" y="${Math.min(fibPriceY(oteStart), fibPriceY(oteEnd))}" width="463" height="${Math.abs(fibPriceY(oteStart) - fibPriceY(oteEnd))}" fill="#E4EFE8" opacity="0.65"/><text x="526" y="${(fibPriceY(oteStart) + fibPriceY(oteEnd)) / 2 + 3}" fill="#1F5C3E" font-size="9">OTE ZONE</text>`
+    : fibLevelMarks(direction);
+  const anchorLine = `<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="#A88948" stroke-width="1.5" stroke-dasharray="3 3"/>`;
+  const note = direction === 'bearish'
+    ? 'Hypothetical bearish impulse: 2340 high to 2300 low'
+    : 'Hypothetical bullish impulse: 2300 low to 2340 high';
+  const executionFootnote = direction === 'bearish'
+    ? `OTE ${Math.min(oteStart, oteEnd).toFixed(2)}-${Math.max(oteStart, oteEnd).toFixed(2)} · entry 2322 · stop 2332 · target 2302 = 2R gross before costs.`
+    : `OTE ${Math.min(oteStart, oteEnd).toFixed(2)}-${Math.max(oteStart, oteEnd).toFixed(2)} · entry 2314 · stop 2307 · target 2328 = 2R gross before costs.`;
+  const contents = `<text x="48" y="43" fill="#4A453F" font-size="9">${note} · 40.00 range · price bars are illustrative</text>${fibLines}${drawPriceCandles(candles)}${variant === 'anchors' ? anchorLine : ''}${overlays}<text x="48" y="219" fill="#7D766D" font-size="9">${variant === 'execution' ? executionFootnote : 'Green band = 61.8%-78.6% retracement area; levels do not predict reversal.'}</text>`;
+  return svgFrame(`Price-based Fibonacci example: ${heading}`, contents, '0 0 720 240');
+}
+
+function renderFibPracticeChart(heading) {
+  const confirmed = [[34, 48, 29, 43], [43, 62, 39, 59], [59, 67, 50, 54], [53, 70, 51, 67], [67, 84, 64, 81]];
+  const noTrigger = [[72, 78, 56, 61], [61, 65, 45, 51], [51, 62, 46, 58], [58, 63, 49, 54], [54, 59, 40, 45]];
+  const content = `<rect x="28" y="48" width="315" height="132" fill="#F2EFE5" stroke="#D8D3C3"/><rect x="377" y="48" width="315" height="132" fill="#F2EFE5" stroke="#D8D3C3"/><text x="42" y="65" fill="#1F5C3E" font-size="10" font-weight="bold">A · PREDEFINED TRIGGER PRINTED</text><text x="391" y="65" fill="#8F251E" font-size="10" font-weight="bold">B · ZONE TOUCHED, NO TRIGGER</text><rect x="45" y="112" width="280" height="17" fill="#E4EFE8" opacity="0.75"/><rect x="394" y="112" width="280" height="17" fill="#E4EFE8" opacity="0.75"/>${drawCandles(confirmed, { x: 46, y: 76, width: 280, height: 92, candleWidth: 15 })}${drawCandles(noTrigger, { x: 395, y: 76, width: 280, height: 92, candleWidth: 15 })}<line x1="43" y1="185" x2="678" y2="185" stroke="#7D766D"/><text x="44" y="201" fill="#4A453F" font-size="9">Record both outcomes; the second example is a planned pass, not a missed trade.</text>`;
+  return svgFrame(`Fibonacci replay drill: ${heading}`, content, '0 0 720 215');
+}
+
+function renderFibonacciTopic(heading) {
+  const label = heading.toLowerCase();
+  if (/bearish mirror/.test(label)) return renderFibPriceChart(heading, 'levels', 'bearish');
+  if (/anchor/.test(label)) return renderFibPriceChart(heading, 'anchors');
+  if (/confluence/.test(label)) return renderFibPriceChart(heading, 'confluence');
+  if (/stops and targets|ote entry/.test(label)) return renderFibPriceChart(heading, 'execution');
+  if (/practice task/.test(label)) return renderFibPracticeChart(heading);
+  return renderFibPriceChart(heading, 'levels');
+}
+
+function renderIpdaTopic(heading, index) {
+  const showShortTrigger = index % 2 === 1 || /trigger|example|sweep/i.test(heading);
+  const path = 'M70 145 L150 112 L230 128 L315 82 L405 103 L465 34 L500 70 L535 97 L575 125 L650 157';
+  const triggerLabel = showShortTrigger ? 'close back + structure break' : 'define the range before a trigger';
+  return svgFrame(`IPDA-style range hypothesis: ${heading}`, `<rect x="54" y="58" width="620" height="106" fill="#F2EFE5" opacity="0.75"/><line x1="54" y1="58" x2="674" y2="58" stroke="#8F251E" stroke-dasharray="5 4"/><text x="58" y="52" fill="#8F251E" font-size="10">range high / external liquidity 2340</text><line x1="54" y1="111" x2="674" y2="111" stroke="#A88948" stroke-dasharray="4 4"/><text x="58" y="106" fill="#A88948" font-size="10">EQ 2320 · premium above / discount below</text><line x1="54" y1="164" x2="674" y2="164" stroke="#1F5C3E" stroke-dasharray="5 4"/><text x="58" y="181" fill="#1F5C3E" font-size="10">range low 2300 · levels are hypothetical</text><path d="${path}" fill="none" stroke="#1A1816" stroke-width="3" stroke-linejoin="round"/><circle cx="465" cy="34" r="5" fill="#8F251E"/><text x="430" y="30" fill="#8F251E" font-size="10">sweep 2342</text><rect x="520" y="80" width="55" height="18" fill="#E4EFE8" stroke="#1F5C3E"/><text x="525" y="92" fill="#1F5C3E" font-size="9">FVG idea</text><text x="555" y="144" fill="#4A453F" font-size="10">${triggerLabel}</text><text x="580" y="160" fill="#7D766D" font-size="10">target only if planned</text>`);
 }
 
 function renderGoldSetupTopic(lessonId, heading, index) {
@@ -179,6 +284,7 @@ export function renderLessonTopicChart(lessonId, heading, index = 0) {
     case 'lesson-8':
     case 'lesson-9': svg = renderGoldSetupTopic(lessonId, heading, index); break;
     case 'lesson-10': svg = renderPracticeTopic(heading, index); break;
+    case 'lesson-ipda': svg = renderIpdaTopic(heading, index); break;
     default: svg = renderStructureTopic(heading, index);
   }
   return `<figure class="lesson-chart" tabindex="0" role="button" aria-haspopup="dialog" aria-label="Expand chart: ${esc(heading)}"><figcaption>Charting example · ${esc(heading)}</figcaption><div class="lesson-chart-scroll">${svg}</div><small>Schematic illustration for study; not live price data or a trade signal.</small></figure>`;

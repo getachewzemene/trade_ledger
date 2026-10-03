@@ -548,6 +548,10 @@ console.log('\n--- Suite 15: Lesson Charting Examples ---');
     const chart = renderLessonTopicChart(`lesson-${lessonNumber}`, 'Example topic', 0);
     assert(chart.includes('<svg') && chart.includes('role="img"'), `Lesson ${lessonNumber} topic chart renders with accessible SVG`);
   }
+  const ipdaChart = renderLessonTopicChart('lesson-ipda', 'Worked hypothetical gold example', 3);
+  assert(ipdaChart.includes('sweep 2342') && ipdaChart.includes('EQ 2320'), 'IPDA chart shows the hypothetical range and liquidity sweep');
+  assert(renderLessonTopicChart('lesson-7', 'Worked Fibonacci example', 0).includes('2324.72'), 'Fibonacci chart shows calculated retracement price');
+  assert(renderLessonTopicChart('lesson-6', 'Worked profile example', 0).includes('VAH 2336'), 'Volume-profile chart shows hypothetical VAH price');
 
   const candlePatterns = [
     'Hammer', 'Hanging man', 'Inverted hammer', 'Shooting star', 'Bullish pin bar', 'Bearish pin bar',

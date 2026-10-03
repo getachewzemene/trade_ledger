@@ -14,6 +14,16 @@
       <h1>Ledger & Wick</h1>
       <span class="brand-badge">Archival Trading Journal</span>
     </div>
+    <div class="header-account">
+      <div class="session-panel">
+        <button id="btn-open-login-modal" class="btn btn-secondary btn-sm">Login</button>
+        <div id="session-user-panel" class="session-user-panel" style="display: none;">
+          <span id="session-user-label">Trader</span>
+          <button id="btn-logout" class="btn btn-secondary btn-sm">Logout</button>
+        </div>
+        <div id="session-status" class="session-status">Please sign in</div>
+      </div>
+    </div>
     <nav class="main-nav">
       <button class="nav-btn active" data-view="journal-view">Journal Log</button>
       <button class="nav-btn" data-view="gallery-view">Visual Gallery</button>
@@ -32,14 +42,6 @@
       <div id="header-propfirm-badge" class="rubber-stamp stamp-neutral" style="cursor: pointer;" title="Click to open Prop Firm Guardian">PROP: TOPSTEP 50K | +,600 (3.2R)</div>
       <div id="header-playbook-badge" class="rubber-stamp stamp-clean" style="cursor: pointer;" title="Click to open Playbook Studio">PLAYBOOK PURITY: 88% 🎯</div>
       <button id="btn-tilt-status" class="rubber-stamp stamp-clean" style="cursor: pointer; display: none;" title="Active Cooldown Shield">COOLDOWN SHIELD 🛡️</button>
-      <div class="session-panel">
-        <button id="btn-open-login-modal" class="btn btn-secondary btn-sm">Login</button>
-        <div id="session-user-panel" class="session-user-panel" style="display: none;">
-          <span id="session-user-label">Trader</span>
-          <button id="btn-logout" class="btn btn-secondary btn-sm">Logout</button>
-        </div>
-        <div id="session-status" class="session-status">Please sign in</div>
-      </div>
       <button id="btn-open-modal" class="btn btn-primary">+ Log Trade</button>
       <button id="btn-open-report" class="btn btn-secondary">Quick Report</button>
       <button id="btn-save-backup" class="btn btn-secondary">Save Backup</button>

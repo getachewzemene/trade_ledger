@@ -13,7 +13,7 @@ import { calculatePositionSize } from '../engine/sizing.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics, LEAK_DEFINITIONS } from '../engine/leak-detector.js';
 import { buildTradeSummaryReport } from '../engine/reporting.js';
 import { importTradesFromCSV } from '../engine/csv-parser.js';
-import { renderCandlestickDiagram, renderMarketStructureDiagram, renderRetestDiagram, renderTradeChartSVG } from '../engine/diagrams.js';
+import { renderTradeChartSVG } from '../engine/diagrams.js';
 import { calculateExcursionR, analyzeExcursionPatterns } from '../engine/excursion.js';
 import { evaluateCircuitBreaker, DEFAULT_TRADING_CONTRACT } from '../engine/contract.js';
 import { gradeTradeDebrief, evaluateTiltState } from '../engine/debrief-tilt.js';
@@ -1351,14 +1351,13 @@ function renderCurriculum() {
   const currentLesson = curriculumData.find(l => l.id === activeLessonId) || curriculumData[0];
   if (!currentLesson) return;
 
+  const supplementalContent = Array.isArray(currentLesson.supplementalSections)
+    ? currentLesson.supplementalSections.map(section => `### ${section.heading}\n\n${section.content}`).join('\n\n')
+    : '';
+  const lessonContent = [currentLesson.content, supplementalContent].filter(Boolean).join('\n\n');
+
   let diagramHtml = '';
-  if (currentLesson.diagramType === 'CANDLESTICK_SVG') {
-    diagramHtml = `<div class="diagram-wrapper">${renderCandlestickDiagram()}</div>`;
-  } else if (currentLesson.diagramType === 'STRUCTURE_SVG') {
-    diagramHtml = `<div class="diagram-wrapper">${renderMarketStructureDiagram()}</div>`;
-  } else if (currentLesson.diagramType === 'RETEST_SVG') {
-    diagramHtml = `<div class="diagram-wrapper">${renderRetestDiagram()}</div>`;
-  } else if (currentLesson.diagramType === 'DRAWDOWN_TABLE') {
+  if (currentLesson.diagramType === 'DRAWDOWN_TABLE') {
     diagramHtml = `
       <div class="card" style="margin: 1.5rem 0;">
         <h4 style="font-family: var(--font-serif); margin-bottom: 0.5rem;">Asymmetric Capital Recovery Table</h4>
@@ -1389,7 +1388,7 @@ function renderCurriculum() {
     <p style="font-style: italic; color: var(--ink-secondary); margin-bottom: 1.5rem;">${currentLesson.summary}</p>
     ${diagramHtml}
     <div style="font-size: 0.95rem; line-height: 1.7; color: var(--ink-primary); margin-top: 1.5rem;">
-      ${renderLessonContent(currentLesson.content, currentLesson.id)}
+      ${renderLessonContent(lessonContent, currentLesson.id)}
     </div>
     ${currentLesson.demoSetupId ? `<div class="lesson-practice-action"><div><strong>Ready to rehearse the rules?</strong><p>Opens the simulated journal form with this setup selected. No broker connection or orders.</p></div><button type="button" class="btn btn-primary lesson-demo-button" data-setup-id="${currentLesson.demoSetupId}">Start demo practice</button></div>` : ''}
   `;
