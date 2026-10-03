@@ -1,0 +1,522 @@
+/**
+ * Standalone Zero-Dependency Server for Ledger & Wick Trading Journal
+ * Extended with Simulation, Tilt State, Debrief, and Prop Firm Guardian API endpoints.
+ */
+
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { importTradesFromCSV } from './src/engine/csv-parser.js';
+import { calculatePerformanceMetrics } from './src/engine/metrics.js';
+import { analyzeTradeViolations, calculateLeakDiagnostics } from './src/engine/leak-detector.js';
+import { analyzeExcursionPatterns } from './src/engine/excursion.js';
+import { evaluateCircuitBreaker, DEFAULT_TRADING_CONTRACT } from './src/engine/contract.js';
+import { gradeTradeDebrief, evaluateTiltState } from './src/engine/debrief-tilt.js';
+import { simulateLosingStreakProbabilities } from './src/engine/simulation.js';
+import { 
+  DEFAULT_PLAYBOOK_SETUPS, 
+  evaluateTradeConfluence, 
+  calculateCounterfactualEquitySplit, 
+  calculateSessionKillzoneMetrics 
+} from './src/engine/playbook.js';
+import { 
+  PROP_FIRM_PRESETS, 
+  calculateDynamicDrawdownBuffer, 
+  calculateRunwaySafeRisk, 
+  calculateConsistencyMetrics, 
+  auditPayoutEligibility 
+} from './src/engine/prop-firm.js';
+import { validateTradePayload, normalizeTradePayload } from './src/engine/validation.js';
+import { buildTradeSummaryReport, buildTradeCsvExport } from './src/engine/reporting.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'src', 'public');
+const ENGINE_DIR = path.join(__dirname, 'src', 'engine');
+const DATA_DIR = path.join(__dirname, 'src', 'data');
+
+const writeJsonFile = (fileName, data) => {
+  const filePath = path.join(DATA_DIR, fileName);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    return true;
+  } catch (err) {
+    console.warn(`Could not write ${fileName}: ${err.message}`);
+    return false;
+  }
+};
+
+const readJsonFile = (fileName, fallback = []) => {
+  const filePath = path.join(DATA_DIR, fileName);
+  try {
+    const contents = fs.readFileSync(filePath, 'utf8');
+    return contents ? JSON.parse(contents) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const persistTrades = () => writeJsonFile('trades.json', activeTrades);
+
+// Load initial sample trades
+let activeTrades = [];
+try {
+  const sampleData = fs.readFileSync(path.join(DATA_DIR, 'sample-trades.json'), 'utf8');
+  const defaultTrades = JSON.parse(sampleData);
+  activeTrades = readJsonFile('trades.json', defaultTrades);
+} catch (err) {
+  console.error('Error loading initial sample trades:', err.message);
+}
+
+// Load curriculum
+let curriculumData = [];
+try {
+  const currData = fs.readFileSync(path.join(DATA_DIR, 'curriculum.json'), 'utf8');
+  curriculumData = JSON.parse(currData);
+} catch (err) {
+  console.error('Error loading curriculum:', err.message);
+}
+
+// Load contract
+let tradingContract = { ...DEFAULT_TRADING_CONTRACT };
+try {
+  const contractData = readJsonFile('contract.json', DEFAULT_TRADING_CONTRACT);
+  tradingContract = { ...DEFAULT_TRADING_CONTRACT, ...contractData };
+} catch (err) {
+  console.warn('Using default trading contract.');
+}
+
+// Load pre-session logs
+let preSessionLogs = [];
+try {
+  preSessionLogs = readJsonFile('presession.json', []);
+} catch (err) {
+  console.warn('No existing presession logs found.');
+}
+
+// Load prop firm configuration
+let playbookConfig = {
+  activeSetups: ["BREAKOUT_RETEST", "LIQUIDITY_SWEEP", "TREND_PULLBACK", "DISCRETIONARY"],
+  purityGoalPercent: 90
+};
+try {
+  const pbData = fs.readFileSync(path.join(DATA_DIR, 'playbook.json'), 'utf8');
+  playbookConfig = JSON.parse(pbData);
+} catch (err) {
+  console.warn('Using default playbook config.');
+}
+
+let propFirmConfig = {
+  activeProfileId: 'TOPSTEP_50K',
+  plannedTradesToday: 2,
+  safetyMarginPercent: 25,
+  accountStage: 'EVALUATION'
+};
+try {
+  const pfData = fs.readFileSync(path.join(DATA_DIR, 'prop-firm.json'), 'utf8');
+  propFirmConfig = JSON.parse(pfData);
+} catch (err) {
+  console.warn('Using default prop firm config.');
+}
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon'
+};
+
+const server = http.createServer((req, res) => {
+  const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = parsedUrl.pathname;
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  // --- API Endpoints ---
+
+  // Health check
+  if (pathname === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', uptime: process.uptime(), tradesCount: activeTrades.length }));
+    return;
+  }
+
+  // GET /api/trades
+  if (pathname === '/api/trades' && req.method === 'GET') {
+    const analyzed = analyzeTradeViolations(activeTrades);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(analyzed));
+    return;
+  }
+
+  // POST /api/trades
+  if (pathname === '/api/trades' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        const { valid, errors, trade } = validateTradePayload(payload);
+
+        if (!valid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid trade payload', details: errors }));
+          return;
+        }
+
+        const safeTrade = { ...trade };
+
+        // Attach confluence evaluation if setup provided
+        if (safeTrade.setupId) {
+          const confResult = evaluateTradeConfluence(safeTrade.setupId, safeTrade.criteria || []);
+          safeTrade.confluence = confResult;
+          safeTrade.isPlaybookCompliant = confResult.isPlaybookCompliant;
+          if (confResult.inferredViolations && confResult.inferredViolations.length > 0) {
+            safeTrade.violations = safeTrade.violations || [];
+            confResult.inferredViolations.forEach(v => {
+              if (!safeTrade.violations.includes(v)) safeTrade.violations.push(v);
+            });
+          }
+        }
+
+        // Attach debrief grade if present
+        if (safeTrade.debrief) {
+          const debriefGrade = gradeTradeDebrief(safeTrade.debrief);
+          safeTrade.disciplineGrade = debriefGrade.grade;
+          safeTrade.disciplineScore = debriefGrade.score;
+          if (debriefGrade.inferredViolations.length > 0) {
+            safeTrade.violations = safeTrade.violations || [];
+            debriefGrade.inferredViolations.forEach(v => {
+              if (!safeTrade.violations.includes(v)) safeTrade.violations.push(v);
+            });
+          }
+        }
+
+        // Evaluate circuit breaker
+        const circuit = evaluateCircuitBreaker({
+          trades: activeTrades,
+          contract: tradingContract,
+          candidateTradeDate: safeTrade.entryDate || new Date().toISOString(),
+          preSessionLogs
+        });
+
+        if (circuit.isTripped && !safeTrade.violations?.includes('CONTRACT_BREACH')) {
+          safeTrade.violations = safeTrade.violations || [];
+          safeTrade.violations.push('CONTRACT_BREACH');
+        }
+
+        safeTrade.id = safeTrade.id || `TR-${1000 + activeTrades.length + 1}`;
+        activeTrades.push(safeTrade);
+        persistTrades();
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Trade recorded successfully', trade: safeTrade, circuit }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      }
+    });
+    return;
+  }
+
+  // GET /api/analytics
+  if (pathname === '/api/analytics' && req.method === 'GET') {
+    const analyzed = analyzeTradeViolations(activeTrades);
+    const metrics = calculatePerformanceMetrics(analyzed);
+    const diagnostics = calculateLeakDiagnostics(analyzed);
+    const excursion = analyzeExcursionPatterns(analyzed);
+    const tilt = evaluateTiltState(analyzed, tradingContract.cooldownMinutes);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ metrics, diagnostics, excursion, tilt }));
+    return;
+  }
+
+  // GET /api/simulation
+  if (pathname === '/api/simulation' && req.method === 'GET') {
+    const analyzed = analyzeTradeViolations(activeTrades);
+    const metrics = calculatePerformanceMetrics(analyzed);
+    const winRate = metrics.winRate > 0 ? metrics.winRate : 50;
+    const sim = simulateLosingStreakProbabilities({ winRatePercent: winRate, tradesCount: 100, iterations: 1000 });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(sim));
+    return;
+  }
+
+  // GET /api/tilt
+  if (pathname === '/api/tilt' && req.method === 'GET') {
+    const analyzed = analyzeTradeViolations(activeTrades);
+    const tilt = evaluateTiltState(analyzed, tradingContract.cooldownMinutes);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(tilt));
+    return;
+  }
+
+  // GET & POST /api/prop-firm/profile
+  if (pathname === '/api/prop-firm/profile') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        config: propFirmConfig,
+        presets: PROP_FIRM_PRESETS
+      }));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const updated = JSON.parse(body);
+          propFirmConfig = { ...propFirmConfig, ...updated };
+          try {
+            fs.writeFileSync(path.join(DATA_DIR, 'prop-firm.json'), JSON.stringify(propFirmConfig, null, 2));
+          } catch (writeErr) {
+            console.warn('Could not write prop-firm.json:', writeErr.message);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'Prop firm config updated', config: propFirmConfig }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // GET /api/prop-firm/metrics
+  if (pathname === '/api/prop-firm/metrics' && req.method === 'GET') {
+    const profile = PROP_FIRM_PRESETS[propFirmConfig.activeProfileId] || PROP_FIRM_PRESETS.TOPSTEP_50K;
+    const buffer = calculateDynamicDrawdownBuffer(activeTrades, profile);
+    const runway = calculateRunwaySafeRisk(
+      buffer.effectiveImmediateCushionDollars,
+      propFirmConfig.plannedTradesToday || 2,
+      propFirmConfig.safetyMarginPercent || 25
+    );
+    const consistency = calculateConsistencyMetrics(activeTrades, profile.consistencyRulePercent);
+    const audit = auditPayoutEligibility(activeTrades, profile);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      config: propFirmConfig,
+      profile,
+      buffer,
+      runway,
+      consistency,
+      audit
+    }));
+    return;
+  }
+
+  // GET & POST /api/playbook
+  if (pathname === '/api/playbook') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        setups: DEFAULT_PLAYBOOK_SETUPS,
+        config: playbookConfig
+      }));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const updated = JSON.parse(body);
+          playbookConfig = { ...playbookConfig, ...updated };
+          try {
+            fs.writeFileSync(path.join(DATA_DIR, 'playbook.json'), JSON.stringify(playbookConfig, null, 2));
+          } catch (writeErr) {
+            console.warn('Could not write playbook.json:', writeErr.message);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'Playbook updated successfully', config: playbookConfig }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // GET /api/playbook/counterfactual
+  if (pathname === '/api/playbook/counterfactual' && req.method === 'GET') {
+    const analyzed = analyzeTradeViolations(activeTrades);
+    const counterfactual = calculateCounterfactualEquitySplit(analyzed);
+    const killzones = calculateSessionKillzoneMetrics(analyzed);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      counterfactual,
+      killzones,
+      config: playbookConfig
+    }));
+    return;
+  }
+
+  // GET & POST /api/contract
+  if (pathname === '/api/contract') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(tradingContract));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const updated = JSON.parse(body);
+          tradingContract = { ...tradingContract, ...updated };
+          writeJsonFile('contract.json', tradingContract);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'Contract updated successfully', contract: tradingContract }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // GET & POST /api/presession
+  if (pathname === '/api/presession') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(preSessionLogs));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const log = JSON.parse(body);
+          log.id = log.id || `PRE-${new Date().toISOString().slice(0, 10)}`;
+          log.date = log.date || new Date().toISOString();
+          log.completed = true;
+          preSessionLogs.unshift(log);
+          writeJsonFile('presession.json', preSessionLogs);
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'Pre-session checklist saved', log }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // GET /api/reports/summary
+  if (pathname === '/api/reports/summary' && req.method === 'GET') {
+    const report = buildTradeSummaryReport(activeTrades);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(report));
+    return;
+  }
+
+  // GET /api/reports/export
+  if (pathname === '/api/reports/export' && req.method === 'GET') {
+    const format = parsedUrl.searchParams.get('format') || 'json';
+    if (format === 'csv') {
+      const csv = buildTradeCsvExport(activeTrades);
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="ledger_report_${new Date().toISOString().slice(0, 10)}.csv"`
+      });
+      res.end(csv);
+      return;
+    }
+
+    const report = buildTradeSummaryReport(activeTrades);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(report));
+    return;
+  }
+
+  // GET /api/curriculum
+  if (pathname === '/api/curriculum' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(curriculumData));
+    return;
+  }
+
+  // POST /api/csv-import
+  if (pathname === '/api/csv-import' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { csvText } = JSON.parse(body);
+        const result = importTradesFromCSV(csvText, activeTrades);
+        const validatedTrades = result.trades.map((trade) => {
+          const { valid, trade: normalizedTrade } = validateTradePayload(trade);
+          return valid ? normalizedTrade : null;
+        }).filter(Boolean);
+
+        if (validatedTrades.length > 0) {
+          activeTrades.push(...validatedTrades);
+          persistTrades();
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ...result, imported: validatedTrades.length, skipped: result.trades.length - validatedTrades.length }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // --- Static File Serving ---
+
+  let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
+
+  if (pathname.startsWith('/engine/')) {
+    filePath = path.join(ENGINE_DIR, pathname.replace('/engine/', ''));
+  } else if (pathname.startsWith('/data/')) {
+    filePath = path.join(DATA_DIR, pathname.replace('/data/', ''));
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      if (err.code === 'ENOENT') {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('404 Not Found');
+      } else {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('500 Internal Server Error');
+      }
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(content);
+  });
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`[Ledger & Wick] Server running on http://127.0.0.1:${PORT}`);
+});

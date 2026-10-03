@@ -1,0 +1,10 @@
+# Generated test output
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Temporary files and logs created while testing
+*.tmp
+*.log

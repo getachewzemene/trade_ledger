@@ -1,0 +1,20 @@
+{
+  "name": "ledger-and-wick-trading-journal",
+  "version": "1.0.0",
+  "description": "Archival paper-ledger trading journal for beginners with behavioral leak detection, multi-asset position sizing, and price-action curriculum.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/run-tests.js"
+  },
+  "keywords": [
+    "trading",
+    "journal",
+    "paper-ledger",
+    "risk-management",
+    "price-action",
+    "leak-detector"
+  ],
+  "author": "Trading Systems Architect",
+  "license": "MIT"
+}

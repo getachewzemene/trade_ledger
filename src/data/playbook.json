@@ -1,0 +1,10 @@
+{
+  "activeSetups": [
+    "BREAKOUT_RETEST",
+    "LIQUIDITY_SWEEP",
+    "TREND_PULLBACK",
+    "DISCRETIONARY"
+  ],
+  "purityGoalPercent": 90,
+  "notes": "Focus exclusively on A+ setups with 100% confluence verified before entry."
+}

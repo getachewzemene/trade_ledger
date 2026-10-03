@@ -1,0 +1,10 @@
+{
+  "traderName": "Disciplined Operator",
+  "maxDailyTrades": 3,
+  "maxDailyLossR": 2.0,
+  "cooldownMinutes": 30,
+  "enforcePreSession": true,
+  "maxRiskPerTradePercent": 1.5,
+  "ruleAgreementTimestamp": "2026-09-01T08:00:00Z",
+  "oathPledge": "I solemnly vow to protect capital before seeking profit. I will define risk on every trade, honor stops without hesitation, and step away when daily limits are reached."
+}

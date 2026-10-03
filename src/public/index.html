@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ledger & Wick — Archival Trading Journal</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="brand">
+      <h1>Ledger & Wick</h1>
+      <span class="brand-badge">Archival Trading Journal</span>
+    </div>
+    <nav class="main-nav">
+      <button class="nav-btn active" data-view="journal-view">Journal Log</button>
+      <button class="nav-btn" data-view="gallery-view">Visual Gallery</button>
+      <button class="nav-btn" data-view="presession-view">Pre-Session</button>
+      <button class="nav-btn" data-view="trading-plan-view">Trading Plan</button>
+      <button class="nav-btn" data-view="contract-view">Trader's Oath</button>
+      <button class="nav-btn" data-view="propfirm-view">Prop Firm Guardian 🛡️</button>
+      <button class="nav-btn" data-view="playbook-view">Playbook & Edge 🎯</button>
+      <button class="nav-btn" data-view="leaks-view">Discipline & Leaks</button>
+      <button class="nav-btn" data-view="analytics-view">Performance & Variance</button>
+      <button class="nav-btn" data-view="curriculum-view">Price Action Lessons</button>
+      <button class="nav-btn" data-view="import-view">CSV Import</button>
+    </nav>
+    <div class="header-actions">
+      <div id="header-gatekeeper-badge" class="rubber-stamp stamp-clean" style="cursor: pointer;" title="Click to view Pre-Session Audit">PRE-SESSION: READY ✓</div>
+      <div id="header-propfirm-badge" class="rubber-stamp stamp-neutral" style="cursor: pointer;" title="Click to open Prop Firm Guardian">PROP: TOPSTEP 50K | +,600 (3.2R)</div>
+      <div id="header-playbook-badge" class="rubber-stamp stamp-clean" style="cursor: pointer;" title="Click to open Playbook Studio">PLAYBOOK PURITY: 88% 🎯</div>
+      <button id="btn-tilt-status" class="rubber-stamp stamp-clean" style="cursor: pointer; display: none;" title="Active Cooldown Shield">COOLDOWN SHIELD 🛡️</button>
+      <div class="session-panel">
+        <button id="btn-open-login-modal" class="btn btn-secondary btn-sm">Login</button>
+        <div id="session-user-panel" class="session-user-panel" style="display: none;">
+          <span id="session-user-label">Trader</span>
+          <button id="btn-logout" class="btn btn-secondary btn-sm">Logout</button>
+        </div>
+        <div id="session-status" class="session-status">Please sign in</div>
+      </div>
+      <button id="btn-open-modal" class="btn btn-primary">+ Log Trade</button>
+      <button id="btn-open-report" class="btn btn-secondary">Quick Report</button>
+      <button id="btn-save-backup" class="btn btn-secondary">Save Backup</button>
+      <button id="btn-export-json" class="btn btn-secondary">Export JSON</button>
+      <button id="btn-export-csv" class="btn btn-secondary">Export CSV</button>
+    </div>
+  </header>
+
+  <section class="dashboard-summary">
+    <div class="summary-grid">
+      <div class="summary-card">
+        <span class="summary-label">Total trades</span>
+        <strong id="summary-total-trades" class="summary-value">0</strong>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">Win rate</span>
+        <strong id="summary-win-rate" class="summary-value">0%</strong>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">Net PnL</span>
+        <strong id="summary-net-pnl" class="summary-value">+$0.00</strong>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">Violations</span>
+        <strong id="summary-violations" class="summary-value">0 rules</strong>
+      </div>
+    </div>
+    <div id="report-summary-panel" class="report-panel"></div>
+  </section>
+
+  <!-- Continuous Discipline Tape Hero -->
+  <div class="tape-container">
+    <div class="tape-label">
+      <span>Discipline Tape</span>
+      <span>|</span>
+    </div>
+    <div id="tape-items" class="tape-items">
+      <!-- Dynamically populated tape nodes -->
+    </div>
+  </div>
+
+  <!-- Main Container -->
+  <main class="app-main">
+
+    <!-- View 1: Journal Log -->
+    <section id="journal-view" class="view-section active">
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 1rem;">
+        <div>
+          <h2 style="font-family: var(--font-serif); font-size: 1.5rem;">Archival Trade Ledger</h2>
+          <p style="color: var(--ink-secondary); font-size: 0.85rem;">Chronological audit of planned risk, executions, and discipline stamps.</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <input type="text" id="filter-search" class="form-control" placeholder="Search symbol or setup..." style="width: 220px;">
+          <select id="filter-asset" class="form-control" style="width: 140px;">
+            <option value="ALL">All Assets</option>
+            <option value="EQUITY">Equities</option>
+            <option value="FOREX">Forex</option>
+            <option value="FUTURES">Futures</option>
+            <option value="CRYPTO">Crypto</option>
+          </select>
+          <select id="filter-violations" class="form-control" style="width: 160px;">
+            <option value="ALL">All Trades</option>
+            <option value="CLEAN">Clean Trades Only</option>
+            <option value="VIOLATIONS">With Violations</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Date / Time</th>
+              <th>Asset</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Stop Loss</th>
+              <th>Size</th>
+              <th>Net PnL</th>
+              <th>R-Mult</th>
+              <th>Grade</th>
+              <th>Discipline Stamp</th>
+              <th>Setup</th>
+              <th>Chart</th>
+            </tr>
+          </thead>
+          <tbody id="trade-table-body">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- View 2: Visual Trade Gallery & Annotator -->
+    <section id="gallery-view" class="view-section">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <div>
+          <h2 style="font-family: var(--font-serif); font-size: 1.5rem;">Visual Trade Gallery & Filmstrip</h2>
+          <p style="color: var(--ink-secondary); font-size: 0.85rem;">Review execution charts, markups, and setup structures.</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <select id="gallery-filter-setup" class="form-control" style="width: 220px;">
+            <option value="ALL">All Setups</option>
+            <option value="BREAKOUT_RETEST">Breakout & Retest</option>
+            <option value="TREND_CONTINUATION">Trend Continuation</option>
+            <option value="LIQUIDITY_SWEEP">Liquidity Sweep / Pin Bar</option>
+            <option value="GOLD_OTE_15M">Gold OTE D/4H to 15M</option>
+            <option value="GOLD_TREND_5M">Gold OTE D/1H to 5M</option>
+            <option value="DISCRETIONARY">Discretionary</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="gallery-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.5rem;">
+        <!-- Populated via JS -->
+      </div>
+    </section>
+
+    <!-- View 3: Daily Pre-Session Checklist (Gatekeeper) -->
+    <section id="presession-view" class="view-section">
+      <div style="max-width: 800px; margin: 0 auto;">
+        <div class="card" style="border: 2px solid var(--accent-brass); margin-bottom: 1.5rem; background: var(--ledger-paper-subtle);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <div>
+              <span class="rubber-stamp stamp-clean">SESSION AUDIT</span>
+              <h2 style="font-family: var(--font-serif); font-size: 1.5rem; margin-top: 0.25rem;">Pre-Market Preparation Routine</h2>
+            </div>
+            <span id="presession-today-date" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-muted);"></span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--ink-secondary); margin-bottom: 1.25rem;">
+            The contract requires completing this 4-point routine before logging any execution. Unprepared trades receive an automatic penalty stamp.
+          </p>
+
+          <form id="presession-form">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Higher Timeframe Bias (Daily / 4H)</label>
+                <select id="pre-bias" class="form-control">
+                  <option value="BULLISH">Bullish (Seeking Longs)</option>
+                  <option value="BEARISH">Bearish (Seeking Shorts)</option>
+                  <option value="NEUTRAL">Neutral / Ranging</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>High-Impact News Calendar</label>
+                <select id="pre-news" class="form-control">
+                  <option value="true">Checked & Clear (No Major Events Pending)</option>
+                  <option value="false">High-Impact News Imminent (FOMC, NFP, CPI)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>Max Session Loss Limit (R)</label>
+                <input type="number" step="0.5" id="pre-loss-limit" class="form-control" value="2.0">
+              </div>
+
+              <div class="form-group">
+                <label>Mental & Emotional Readiness</label>
+                <select id="pre-readiness" class="form-control">
+                  <option value="CALM">Calm, Patient, & Focused</option>
+                  <option value="FATIGUED">Fatigued / Sleep Deprived</option>
+                  <option value="DISTRACTED">Distracted / Agitated</option>
+                </select>
+              </div>
+
+              <div class="form-group full">
+                <label>Preparation Notes & Key Levels</label>
+                <textarea id="pre-notes" class="form-control" rows="2" placeholder="Key support/resistance levels, major overnight swing highs, dollar index trend..."></textarea>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 0.5rem;">
+              <button type="submit" class="btn btn-primary">Sign & Lock Pre-Session Audit</button>
+            </div>
+          </form>
+        </div>
+
+        <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin-bottom: 0.75rem;">Past Session Audits</h3>
+        <div id="presession-history-list" style="display: grid; gap: 0.75rem;"></div>
+      </div>
+    </section>
+
+    <!-- View 4: Personal Trading Plan -->
+    <section id="trading-plan-view" class="view-section">
+      <div class="trading-plan-layout">
+        <section class="card trading-plan-editor">
+          <div class="plan-heading">
+            <div>
+              <span class="rubber-stamp stamp-neutral">PERSONAL RULEBOOK</span>
+              <h2>Trading Plan</h2>
+              <p>Set the conditions you trade, the risk you accept, and the rules you will follow every session.</p>
+            </div>
+            <div id="plan-daily-status" class="plan-status" aria-live="polite">0 / 7 complete</div>
+          </div>
+
+          <form id="trading-plan-form">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="plan-name">Plan name</label>
+                <input id="plan-name" class="form-control" maxlength="80" required>
+              </div>
+              <div class="form-group">
+                <label for="plan-markets">Markets / symbols</label>
+                <input id="plan-markets" class="form-control" maxlength="160" placeholder="ES, NQ, EURUSD">
+              </div>
+              <div class="form-group">
+                <label for="plan-window">Trading window and timezone</label>
+                <input id="plan-window" class="form-control" maxlength="100" placeholder="09:30-11:30 ET">
+              </div>
+              <div class="form-group">
+                <label for="plan-risk">Maximum risk per trade (%)</label>
+                <input id="plan-risk" class="form-control" type="number" min="0.1" max="10" step="0.1" required>
+              </div>
+              <div class="form-group">
+                <label for="plan-max-trades">Maximum trades per day</label>
+                <input id="plan-max-trades" class="form-control" type="number" min="1" max="50" step="1" required>
+              </div>
+              <div class="form-group">
+                <label for="plan-max-loss">Daily loss stop (R)</label>
+                <input id="plan-max-loss" class="form-control" type="number" min="0.1" max="100" step="0.1" required>
+              </div>
+              <div class="form-group">
+                <label for="plan-min-rr">Minimum reward-to-risk</label>
+                <input id="plan-min-rr" class="form-control" type="number" min="0.1" max="20" step="0.1" required>
+              </div>
+              <div class="form-group full">
+                <label for="plan-custom-rules">My additional rules, one per line</label>
+                <textarea id="plan-custom-rules" class="form-control" rows="4" maxlength="3200" placeholder="Example: No new positions during the first 5 minutes after the open"></textarea>
+              </div>
+            </div>
+            <div class="plan-form-actions">
+              <span id="plan-save-status" class="plan-save-status" aria-live="polite"></span>
+              <button type="submit" class="btn btn-primary">Save Plan</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="card plan-checklist-panel">
+          <div class="plan-checklist-heading">
+            <div>
+              <h3>Before the session</h3>
+              <p id="plan-checklist-date"></p>
+            </div>
+            <span class="plan-lock-label">All rules required to log a trade</span>
+          </div>
+          <div id="plan-checklist" class="plan-checklist"></div>
+          <div id="plan-limit-summary" class="plan-limit-summary"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- View 4: Trader's Oath & Contract -->
+    <section id="contract-view" class="view-section">
+      <div style="max-width: 800px; margin: 0 auto;">
+        <div class="card" style="border: 2px solid var(--ink-primary); padding: 2.5rem; background: var(--ledger-paper-base); box-shadow: 0 4px 15px rgba(0,0,0,0.06);">
+          <div style="text-align: center; margin-bottom: 2rem;">
+            <div class="rubber-stamp stamp-clean" style="font-size: 0.85rem; padding: 0.35rem 0.75rem;">SOLEMN COVENANT</div>
+            <h2 style="font-family: var(--font-serif); font-size: 2rem; margin-top: 0.5rem; letter-spacing: -0.02em;">The Trader's Oath</h2>
+            <p style="font-style: italic; color: var(--ink-secondary); font-size: 0.95rem; max-width: 600px; margin: 0.5rem auto 0;">
+              "I solemnly vow to protect capital before seeking profit. I will define risk on every trade, honor stops without hesitation, and step away when daily limits are reached."
+            </p>
+          </div>
+
+          <div class="card" style="background: var(--ledger-paper-subtle); border: 1px dashed var(--accent-brass); margin-bottom: 1.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <strong style="font-family: var(--font-serif); font-size: 1.1rem;">Circuit Breaker Status:</strong>
+                <span id="circuit-breaker-status" class="rubber-stamp stamp-clean" style="margin-left: 0.75rem;">ALL SYSTEMS GREEN</span>
+              </div>
+              <div id="circuit-today-summary" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-secondary);">
+                Today: 0/3 Trades | 0.00R Loss
+              </div>
+            </div>
+            <div id="circuit-breach-warnings" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--ledger-loss);"></div>
+          </div>
+
+          <form id="contract-settings-form">
+            <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin-bottom: 1rem;">Trading Contract Rules</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Max Daily Trades</label>
+                <input type="number" id="contract-max-trades" class="form-control" value="3" min="1" max="10">
+                <span style="font-size: 0.75rem; color: var(--ink-muted);">Hard daily ceiling against overtrading</span>
+              </div>
+
+              <div class="form-group">
+                <label>Max Daily Loss (R)</label>
+                <input type="number" step="0.5" id="contract-max-loss" class="form-control" value="2.0" min="0.5">
+                <span style="font-size: 0.75rem; color: var(--ink-muted);">Stop trading when daily cumulative loss reaches this</span>
+              </div>
+
+              <div class="form-group">
+                <label>Mandatory Cooldown (Minutes)</label>
+                <input type="number" id="contract-cooldown" class="form-control" value="30" min="0">
+                <span style="font-size: 0.75rem; color: var(--ink-muted);">Mandatory pause after taking a loss</span>
+              </div>
+
+              <div class="form-group">
+                <label>Enforce Pre-Session Audit</label>
+                <select id="contract-enforce-prep" class="form-control">
+                  <option value="true">Strict (Require morning audit before trading)</option>
+                  <option value="false">Optional</option>
+                </select>
+                <span style="font-size: 0.75rem; color: var(--ink-muted);">Flags unprepared trades as rule violations</span>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 1.5rem;">
+              <button type="submit" class="btn btn-primary">Ratify Contract Updates</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 5: Discipline & Leak Analytics -->
+    <section id="leaks-view" class="view-section">
+      <div class="leak-hero">
+        <h3>Behavioral Leak Diagnostics</h3>
+        <p style="color: var(--ink-secondary); font-size: 0.9rem; margin-bottom: 1rem;">
+          Beginner traders often have profitable setups, but drain capital through psychological leaks: revenge trades, stop widening, and oversized lots.
+        </p>
+        <div class="metrics-grid" style="margin-bottom: 0;">
+          <div class="card" style="border-color: var(--ledger-loss);">
+            <div class="card-title">Cumulative Leak Cost</div>
+            <div id="stat-leak-drain" class="card-value loss">-$0.00</div>
+            <div class="card-subtext">Avoidable capital lost to discipline breaches</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Clean Discipline Rate</div>
+            <div id="stat-discipline-score" class="card-value">0%</div>
+            <div class="card-subtext">Target: ≥ 90% adherence</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Disciplined PnL</div>
+            <div id="stat-clean-pnl" class="card-value gain">+$0.00</div>
+            <div class="card-subtext">Performance when following rules</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Violated PnL</div>
+            <div id="stat-violated-pnl" class="card-value loss">-$0.00</div>
+            <div class="card-subtext">Performance when breaking rules</div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin-bottom: 0.75rem;">Detected Trading Leaks Breakdown</h3>
+      <div id="leak-breakdown-list" style="display: grid; gap: 1rem;"></div>
+    </section>
+
+    <!-- View 6: Performance, Excursion & Monte Carlo Simulator -->
+    <section id="analytics-view" class="view-section">
+      <div class="metrics-grid">
+        <div class="card">
+          <div class="card-title">Net Realized PnL</div>
+          <div id="metric-net-pnl" class="card-value">+$0.00</div>
+          <div id="metric-trades-count" class="card-subtext">0 trades logged</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Win Rate</div>
+          <div id="metric-win-rate" class="card-value">0%</div>
+          <div id="metric-win-loss-split" class="card-subtext">0W / 0L / 0BE</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Profit Factor</div>
+          <div id="metric-profit-factor" class="card-value">0.00</div>
+          <div class="card-subtext">Gross Profit / Gross Loss</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Trade Expectancy</div>
+          <div id="metric-expectancy" class="card-value">0.00R</div>
+          <div id="metric-expectancy-dollars" class="card-subtext">+$0.00 / trade</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Max Drawdown</div>
+          <div id="metric-drawdown" class="card-value loss">-0.0%</div>
+          <div id="metric-drawdown-dollars" class="card-subtext">-$0.00 peak to trough</div>
+        </div>
+      </div>
+
+      <!-- NEW: Monte Carlo Losing Streak Probability Simulator -->
+      <div class="card" style="border: 2px solid var(--stamp-pass); margin-bottom: 1.5rem; background: var(--ledger-paper-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div>
+            <span class="rubber-stamp stamp-clean">SYSTEM-HOPPING CURE</span>
+            <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin-top: 0.25rem;">Monte Carlo Losing Streak & Variance Simulator</h3>
+          </div>
+          <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-secondary);">1,000 Iterations / 100 Trades</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--ink-secondary); margin-bottom: 1rem;">
+          Beginners frequently discard valid strategies after a 3-loss streak. This simulation proves that losing streaks are a mathematical certainty of normal probability, not system failure.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; margin-bottom: 1rem;">
+          <div class="card" style="padding: 0.75rem; text-align: center;">
+            <div class="card-title">3-Loss Streak</div>
+            <div id="sim-streak-3" class="card-value" style="font-size: 1.3rem;">--%</div>
+            <div class="card-subtext">Probability in 100 trades</div>
+          </div>
+          <div class="card" style="padding: 0.75rem; text-align: center;">
+            <div class="card-title">4-Loss Streak</div>
+            <div id="sim-streak-4" class="card-value" style="font-size: 1.3rem;">--%</div>
+            <div class="card-subtext">Probability in 100 trades</div>
+          </div>
+          <div class="card" style="padding: 0.75rem; text-align: center;">
+            <div class="card-title">5-Loss Streak</div>
+            <div id="sim-streak-5" class="card-value" style="font-size: 1.3rem;">--%</div>
+            <div class="card-subtext">Probability in 100 trades</div>
+          </div>
+          <div class="card" style="padding: 0.75rem; text-align: center;">
+            <div class="card-title">6-Loss Streak</div>
+            <div id="sim-streak-6" class="card-value" style="font-size: 1.3rem;">--%</div>
+            <div class="card-subtext">Probability in 100 trades</div>
+          </div>
+          <div class="card" style="padding: 0.75rem; text-align: center;">
+            <div class="card-title">Avg Max Drawdown</div>
+            <div id="sim-avg-streak" class="card-value loss" style="font-size: 1.3rem;">--</div>
+            <div class="card-subtext">Consecutive losses expected</div>
+          </div>
+        </div>
+
+        <div id="sim-advice-text" style="font-size: 0.85rem; line-height: 1.6; color: var(--ink-primary); background: #FFF; padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+          Loading statistical distribution...
+        </div>
+      </div>
+
+      <!-- Excursion (MAE & MFE) Diagnostics Panel -->
+      <div class="card" style="border: 1.5px solid var(--accent-brass); margin-bottom: 1.5rem; background: var(--ledger-paper-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <h3 style="font-family: var(--font-serif); font-size: 1.25rem;">Excursion Analytics (MAE / MFE Diagnostics)</h3>
+          <span class="rubber-stamp stamp-clean" id="stat-target-efficiency">TARGET EFFICIENCY: 0%</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--ink-secondary); margin-bottom: 1rem;">
+          Maximum Adverse Excursion (MAE) measures heat taken before expansion; Maximum Favorable Excursion (MFE) measures peak unrealized gain.
+        </p>
+
+        <div class="metrics-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 1rem;">
+          <div class="card" style="padding: 0.75rem;">
+            <div class="card-title">Avg Winner Heat (MAE)</div>
+            <div id="stat-avg-win-mae" class="card-value loss" style="font-size: 1.3rem;">-0.00R</div>
+            <div class="card-subtext">Average drawdown on winning trades</div>
+          </div>
+          <div class="card" style="padding: 0.75rem;">
+            <div class="card-title">Avg Winner Peak (MFE)</div>
+            <div id="stat-avg-win-mfe" class="card-value gain" style="font-size: 1.3rem;">+0.00R</div>
+            <div class="card-subtext">Peak favorable excursion reached</div>
+          </div>
+          <div class="card" style="padding: 0.75rem;">
+            <div class="card-title">Realized Win Average</div>
+            <div id="stat-avg-realized-win" class="card-value" style="font-size: 1.3rem;">+0.00R</div>
+            <div class="card-subtext">Actual booked return at exit</div>
+          </div>
+          <div class="card" style="padding: 0.75rem;">
+            <div class="card-title">Profit Left on Table</div>
+            <div id="stat-profit-left" class="card-value loss" style="font-size: 1.3rem;">0.00R</div>
+            <div class="card-subtext">Average uncaptured peak upside</div>
+          </div>
+        </div>
+
+        <div id="excursion-insights-list" style="font-size: 0.85rem; line-height: 1.6; color: var(--ink-primary); background: #FFF; padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+
+      <div class="canvas-wrapper">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <h3 style="font-family: var(--font-serif); font-size: 1.2rem;">Cumulative Equity & Drawdown Curve</h3>
+          <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">Starting Capital: $10,000.00</span>
+        </div>
+        <canvas id="equity-chart" width="1300" height="280" style="width: 100%; height: 280px; display: block;"></canvas>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+        <div class="card">
+          <h3 style="font-family: var(--font-serif); font-size: 1.1rem; margin-bottom: 0.75rem;">Performance by Asset Class</h3>
+          <table class="ledger-table">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Trades</th>
+                <th>Win %</th>
+                <th>Total PnL</th>
+                <th>Total R</th>
+              </tr>
+            </thead>
+            <tbody id="table-asset-breakdown"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h3 style="font-family: var(--font-serif); font-size: 1.1rem; margin-bottom: 0.75rem;">Performance by Playbook Setup</h3>
+          <table class="ledger-table">
+            <thead>
+              <tr>
+                <th>Setup</th>
+                <th>Trades</th>
+                <th>Win %</th>
+                <th>Total PnL</th>
+                <th>Total R</th>
+              </tr>
+            </thead>
+            <tbody id="table-setup-breakdown"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- View 7: Price Action Curriculum -->
+    <section id="curriculum-view" class="view-section">
+      <div class="curriculum-grid">
+        <div class="lesson-list" id="curriculum-nav"></div>
+        <div class="lesson-viewer" id="curriculum-content"></div>
+      </div>
+    </section>
+
+    <!-- View 8: CSV Import -->
+    <section id="import-view" class="view-section">
+      <div class="card" style="max-width: 800px; margin: 0 auto;">
+        <h2 style="font-family: var(--font-serif); font-size: 1.5rem; margin-bottom: 0.5rem;">Import Broker CSV Trades</h2>
+        <p style="color: var(--ink-secondary); font-size: 0.85rem; margin-bottom: 1.25rem;">
+          Paste raw CSV records or load preset samples. The engine normalizes numbers, detects synonyms, and dedupes existing rows.
+        </p>
+
+        <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+          <button id="btn-load-sample-csv" class="btn btn-secondary">Load Sample Broker CSV</button>
+          <button id="btn-clear-csv" class="btn btn-secondary">Clear</button>
+        </div>
+
+        <div class="form-group">
+          <label>Raw CSV Content</label>
+          <textarea id="csv-input-text" class="form-control" rows="10" placeholder="Symbol,Type,OpenTime,CloseTime,Price,ClosePrice,Lots,Profit..."></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+          <button id="btn-parse-csv" class="btn btn-primary">Process & Deduplicate Import</button>
+          <span id="csv-import-status" style="font-family: var(--font-mono); font-size: 0.85rem;"></span>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- View 9: Prop Firm Guardian & Dynamic Drawdown Buffer -->
+    <section id="propfirm-view" class="view-section">
+      <!-- Top Control Bar -->
+      <div class="propfirm-header-bar">
+        <div>
+          <h2 style="font-family: var(--font-serif); font-size: 1.5rem;">Prop Firm Guardian & Drawdown Protector</h2>
+          <p style="color: var(--ink-secondary); font-size: 0.85rem;">
+            Intraday high-water mark trailing tracker, dynamic risk runway sizer, and consistency rule monitor.
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+          <div>
+            <label style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted); display: block;">PROP FIRM PRESET</label>
+            <select id="pf-profile-select" class="form-control" style="font-weight: 600; width: 220px;">
+              <!-- Populated via JS -->
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted); display: block;">ACCOUNT STAGE</label>
+            <select id="pf-stage-select" class="form-control" style="width: 140px;">
+              <option value="EVALUATION">Evaluation (Pass)</option>
+              <option value="FUNDED">Funded (Payouts)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted); display: block;">PLAN TRADES TODAY</label>
+            <input type="number" id="pf-trades-today-input" class="form-control" value="2" min="1" max="10" style="width: 80px;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Dynamic Buffer HUD -->
+      <div class="propfirm-hud">
+        <div class="propfirm-metric-card status-healthy" id="pf-card-total-buffer">
+          <div class="propfirm-card-label">
+            <span>Total Drawdown Buffer</span>
+            <span id="pf-badge-drawdown-type" class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">TRAILING HWM</span>
+          </div>
+          <div class="propfirm-card-value" id="pf-val-total-buffer">+,600.00</div>
+          <div class="propfirm-card-sub" id="pf-sub-total-buffer">Floor: 9,400.00 | Cushion: 3.2R</div>
+        </div>
+
+        <div class="propfirm-metric-card status-healthy" id="pf-card-daily-buffer">
+          <div class="propfirm-card-label">
+            <span>Daily Loss Cushion</span>
+            <span id="pf-badge-daily-status" class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">ACTIVE</span>
+          </div>
+          <div class="propfirm-card-value" id="pf-val-daily-buffer">+50.00</div>
+          <div class="propfirm-card-sub" id="pf-sub-daily-buffer">Today PnL: -50.00 | Floor: 9,000</div>
+        </div>
+
+        <div class="propfirm-metric-card" id="pf-card-peak-hwm">
+          <div class="propfirm-card-label">
+            <span>Intraday High-Water Mark</span>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">PEAK</span>
+          </div>
+          <div class="propfirm-card-value" id="pf-val-peak-hwm">1,400.00</div>
+          <div class="propfirm-card-sub" id="pf-sub-peak-hwm">Current Balance: 0,500.00</div>
+        </div>
+
+        <div class="propfirm-metric-card" id="pf-card-target-progress">
+          <div class="propfirm-card-label">
+            <span>Target / Payout Progress</span>
+            <span id="pf-val-target-pct" style="font-family: var(--font-mono); font-size: 0.75rem; font-weight: bold;">73.3%</span>
+          </div>
+          <div class="propfirm-card-value" id="pf-val-profit-accum">+,200.00</div>
+          <div class="propfirm-card-sub" id="pf-sub-profit-target">Goal: ,000.00 (00 to go)</div>
+        </div>
+      </div>
+
+      <!-- 2-Column Functional Grid -->
+      <div class="propfirm-grid-2col">
+        
+        <!-- Left: Dynamic Risk Runway Sizer -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div>
+              <span class="rubber-stamp stamp-clean" style="font-size: 0.7rem;">REVERSE SIZER</span>
+              <h3 style="font-family: var(--font-serif); font-size: 1.2rem; margin-top: 0.25rem;">Daily Risk Runway Sizer</h3>
+            </div>
+            <span id="pf-runway-status-badge" class="rubber-stamp stamp-clean">SAFE TO TRADE</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--ink-secondary); margin-bottom: 1rem;">
+            Calculates backward from your remaining daily drawdown buffer to enforce a hard ceiling on risk per trade, incorporating a 25% slippage & commission cushion.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; background: var(--ledger-paper-base); padding: 1rem; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm);">
+            <div>
+              <span style="font-size: 0.75rem; color: var(--ink-muted); font-family: var(--font-mono);">MAX RISK / TRADE (RAW)</span>
+              <div id="pf-runway-raw-risk" style="font-size: 1.25rem; font-family: var(--font-mono); font-weight: bold;">75.00</div>
+            </div>
+            <div>
+              <span style="font-size: 0.75rem; color: var(--ink-muted); font-family: var(--font-mono);">SAFE CEILING (W/ SLIPPAGE)</span>
+              <div id="pf-runway-safe-risk" style="font-size: 1.25rem; font-family: var(--font-mono); font-weight: bold; color: var(--ledger-gain);">81.25</div>
+            </div>
+          </div>
+
+          <div class="runway-box">
+            <strong style="font-family: var(--font-serif); font-size: 0.95rem; color: var(--ink-primary);">Max Permitted Sizing Right Now:</strong>
+            <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; font-family: var(--font-mono); font-size: 0.85rem;">
+              <div>ES Contracts: <strong id="pf-runway-es">1 contract</strong></div>
+              <div>NQ Contracts: <strong id="pf-runway-nq">0 (Switch to MNQ)</strong></div>
+              <div>Forex: <strong id="pf-runway-fx">1.40 Standard Lots</strong></div>
+            </div>
+            <p id="pf-runway-guidance-text" style="font-size: 0.8rem; color: var(--ink-secondary); margin-top: 0.5rem;">
+              Buffer healthy. Allocate up to 81 per trade across your planned trades.
+            </p>
+          </div>
+        </div>
+
+        <!-- Right: Consistency Rule & Profit Concentration Radar -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div>
+              <span class="rubber-stamp stamp-neutral" style="font-size: 0.7rem;">CONSISTENCY GUARD</span>
+              <h3 style="font-family: var(--font-serif); font-size: 1.2rem; margin-top: 0.25rem;">Profit Concentration Radar</h3>
+            </div>
+            <span id="pf-consistency-badge" class="rubber-stamp stamp-clean">COMPLIANT</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--ink-secondary);">
+            Prevents disqualification under prop firm consistency rules (e.g. max 30% or 50% profit generated on a single day).
+          </p>
+
+          <div style="margin: 1rem 0;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-family: var(--font-mono);">
+              <span>Best Day Profit: <strong id="pf-best-day-profit">50.00</strong> (<span id="pf-best-day-date">2026-09-18</span>)</span>
+              <span>Concentration: <strong id="pf-concentration-pct">29.5%</strong> / Cap: <span id="pf-rule-threshold">30.0%</span></span>
+            </div>
+
+            <div class="consistency-track">
+              <div id="pf-consistency-bar" class="consistency-fill safe" style="width: 29.5%;"></div>
+              <div id="pf-consistency-marker" class="consistency-threshold-marker" style="left: 30%;" title="Rule Threshold Cap"></div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--ink-muted); font-family: var(--font-mono);">
+              <span>0%</span>
+              <span>Safe Zone (&lt;25%)</span>
+              <span style="color: var(--stamp-warning);">Warning (25-30%)</span>
+              <span style="color: var(--ledger-loss);">Breach (&gt;30%)</span>
+            </div>
+          </div>
+
+          <div class="card" style="background: var(--ledger-paper-base); padding: 0.75rem; border: 1px solid var(--ledger-paper-border);">
+            <div style="font-size: 0.85rem; color: var(--ink-secondary);" id="pf-consistency-guidance">
+              Profit distribution is compliant. Maximum additional profit allowed today before hitting the concentration cap is <strong>+8.50</strong>. Consider locking in profits today to protect payout eligibility.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Evaluation & Payout Readiness Checklist -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div>
+            <h3 style="font-family: var(--font-serif); font-size: 1.35rem;">Payout & Evaluation Readiness Audit</h3>
+            <p style="color: var(--ink-secondary); font-size: 0.85rem;">
+              Automated audit verifying every rule requirement before requesting account advancement or profit withdrawal.
+            </p>
+          </div>
+          <div style="text-align: right;">
+            <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted); display: block;">READINESS SCORE</span>
+            <div id="pf-readiness-score" style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: bold; color: var(--ledger-gain);">
+              83% (FINAL MILE)
+            </div>
+          </div>
+        </div>
+
+        <table class="audit-table">
+          <thead>
+            <tr>
+              <th>Rule Requirement</th>
+              <th>Threshold Target</th>
+              <th>Current Account Value</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="pf-audit-table-body">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem;">
+          <button id="btn-copy-pf-audit" class="btn btn-secondary">Copy Audit Report</button>
+          <button id="btn-request-payout-check" class="btn btn-primary">Verify Payout Eligibility</button>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- View 10: Playbook Studio & Counterfactual Equity Edge -->
+    <section id="playbook-view" class="view-section">
+      <!-- Top Metrics Bar -->
+      <div class="playbook-header-bar">
+        <div>
+          <h2 style="font-family: var(--font-serif); font-size: 1.5rem;">Trading Playbook & Counterfactual Edge</h2>
+          <p style="color: var(--ink-secondary); font-size: 0.85rem;">
+            Proof of mathematical edge: separates disciplined execution from impulsive off-playbook leaks.
+          </p>
+        </div>
+        <div style="display: flex; gap: 1.5rem; align-items: center;">
+          <div style="text-align: right;">
+            <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted); display: block;">PLAYBOOK PURITY</span>
+            <div id="pb-purity-score" class="playbook-score-badge">88%</div>
+          </div>
+          <div style="text-align: right; border-left: 1px solid var(--ledger-paper-border); padding-left: 1.5rem;">
+            <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted); display: block;">DISCIPLINE EDGE DELTA</span>
+            <div id="pb-edge-delta" style="font-family: var(--font-mono); font-size: 1.5rem; font-weight: bold; color: var(--ledger-gain);">+$2,450.00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Counterfactual Dual-Curve Equity Chart -->
+      <div class="counterfactual-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div>
+            <h3 style="font-family: var(--font-serif); font-size: 1.35rem;">Counterfactual Equity Curve Comparison</h3>
+            <p style="font-size: 0.85rem; color: var(--ink-secondary);">
+              Compares your actual account trajectory against an account executing exclusively 100% compliant playbook setups.
+            </p>
+          </div>
+          <div class="counterfactual-legend">
+            <div class="legend-item">
+              <div class="legend-line playbook"></div>
+              <span>Disciplined Playbook Only</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-line actual"></div>
+              <span>Realized Account Curve</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-line impulse"></div>
+              <span>Impulse / Off-Playbook Leak</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: var(--ledger-paper-base); border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); padding: 0.75rem;">
+          <canvas id="counterfactual-chart" width="900" height="320" style="width: 100%; height: auto; display: block;"></canvas>
+        </div>
+
+        <!-- Psychological Dollar Impact Callout -->
+        <div class="runway-box" style="margin-top: 1rem; border-left-color: var(--ledger-gain);">
+          <strong style="font-family: var(--font-serif); font-size: 1rem; color: var(--ink-primary);">Behavioral Economics Insight:</strong>
+          <div id="pb-insight-text" style="font-size: 0.85rem; color: var(--ink-secondary); margin-top: 0.35rem;">
+            Calculating discipline edge...
+          </div>
+        </div>
+      </div>
+
+      <!-- Market Session Killzone & Time-of-Day Heatmap -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h3 style="font-family: var(--font-serif); font-size: 1.25rem;">Market Session Killzone Performance Heatmap</h3>
+            <p style="font-size: 0.85rem; color: var(--ink-secondary);">
+              Pinpoint which market hours generate your positive edge versus low-volume hours where discipline degrades.
+            </p>
+          </div>
+          <span class="rubber-stamp stamp-neutral" style="font-size: 0.75rem;">TIME-OF-DAY AUDIT</span>
+        </div>
+
+        <div class="killzone-grid" id="killzone-container">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+
+      <!-- Playbook Setups Studio Grid -->
+      <div class="card">
+        <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin-bottom: 0.25rem;">Defined A+ Playbook Setups</h3>
+        <p style="font-size: 0.85rem; color: var(--ink-secondary); margin-bottom: 1rem;">
+          Your authorized execution catalog. Every trade must satisfy these pre-flight conditions before order submission.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;" id="playbook-cards-container">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <dialog id="lesson-chart-dialog" class="lesson-chart-dialog" aria-labelledby="lesson-chart-dialog-title">
+    <div class="lesson-chart-dialog-header">
+      <div>
+        <span class="rubber-stamp stamp-neutral">CHART DETAIL</span>
+        <h2 id="lesson-chart-dialog-title">Chart example</h2>
+      </div>
+      <button type="button" id="btn-close-lesson-chart" class="close-btn" aria-label="Close expanded chart">&times;</button>
+    </div>
+    <div id="lesson-chart-expanded-canvas" class="lesson-chart-expanded-canvas"></div>
+    <p id="lesson-chart-expanded-note" class="lesson-chart-expanded-note"></p>
+  </dialog>
+
+  <!-- Trader Login Modal -->
+  <div id="login-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 420px; box-shadow: 0 20px 50px rgba(0,0,0,0.25);">
+      <div class="modal-header">
+        <div>
+          <h2>Trader Sign In</h2>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted);">Keep your journal and profile saved locally.</span>
+        </div>
+        <button id="btn-close-login-modal" class="close-btn">&times;</button>
+      </div>
+
+      <form id="login-form" class="session-form" style="display: flex; flex-direction: column; gap: 1rem;">
+        <div>
+          <label for="session-username" style="display: block; font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; color: var(--ink-secondary); margin-bottom: 0.35rem;">Username</label>
+          <input id="session-username" type="text" placeholder="Enter username" aria-label="Username" class="session-input" style="width: 100%;" />
+        </div>
+        <div>
+          <label for="session-password" style="display: block; font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; color: var(--ink-secondary); margin-bottom: 0.35rem;">Password</label>
+          <input id="session-password" type="password" placeholder="Enter password" aria-label="Password" class="session-input" style="width: 100%;" />
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;">
+          <button type="button" id="btn-cancel-login" class="btn btn-secondary btn-sm">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Login</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Interactive Chart Annotator Modal -->
+  <div id="annotator-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 900px; width: 95%;">
+      <div class="modal-header">
+        <div>
+          <h2 id="annotator-title">Trade Chart Markup Studio</h2>
+          <span id="annotator-subtitle" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted);"></span>
+        </div>
+        <button id="btn-close-annotator" class="close-btn">&times;</button>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem; background: var(--ledger-paper-subtle); padding: 0.5rem; border-radius: var(--radius-sm); align-items: center;">
+        <span style="font-family: var(--font-mono); font-size: 0.75rem; font-weight: bold; color: var(--ink-secondary);">TOOLS:</span>
+        <button class="btn btn-secondary btn-sm" id="tool-draw-line">✏️ Draw Line</button>
+        <button class="btn btn-secondary btn-sm" id="tool-add-bos">🏷️ Tag BOS</button>
+        <button class="btn btn-secondary btn-sm" id="tool-add-pinbar">🏷️ Tag Pin Bar</button>
+        <button class="btn btn-secondary btn-sm" id="tool-add-retest">🏷️ Tag Retest</button>
+        <button class="btn btn-secondary btn-sm" id="tool-clear-markup">Clear Markup</button>
+      </div>
+
+      <div style="position: relative; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); overflow: hidden; background: #F7F4EB;">
+        <div id="annotator-chart-container" style="width: 100%; height: auto;"></div>
+        <canvas id="annotator-canvas" width="850" height="420" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair;"></canvas>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+        <span style="font-size: 0.8rem; color: var(--ink-muted); font-family: var(--font-mono);">Click and drag to sketch support/resistance lines or drop tags directly on candles.</span>
+        <button id="btn-save-annotation" class="btn btn-primary">Save Annotation to Trade</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Tilt Interceptor & Cooldown Lockout Shield Modal -->
+  <div id="tilt-shield-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 650px; border: 3px solid var(--ledger-loss); background: #FAF7F2;">
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div class="rubber-stamp stamp-danger" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">TILT INTERCEPTOR ACTIVE</div>
+        <h2 style="font-family: var(--font-serif); font-size: 1.85rem; color: var(--ledger-loss); margin-top: 0.5rem;">Mandatory Cooldown Shield</h2>
+        <div id="tilt-timer-display" style="font-family: var(--font-mono); font-size: 2rem; font-weight: bold; color: var(--ink-primary); margin: 0.5rem 0;">
+          30:00
+        </div>
+        <p style="font-size: 0.85rem; color: var(--ink-secondary);">
+          A losing sequence was detected. The system has initiated an emotional circuit break to prevent revenge trading.
+        </p>
+      </div>
+
+      <div class="card" style="background: var(--ledger-paper-base); border: 1px solid var(--ledger-paper-border); margin-bottom: 1.25rem;">
+        <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin-bottom: 0.75rem;">Mandatory Reset Protocol</h4>
+        <div style="display: grid; gap: 0.65rem; font-size: 0.85rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="check-reset-step1">
+            <span><strong>Physical Distance</strong>: Stepped away from screens, drank water, took 5 deep breaths.</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="check-reset-step2">
+            <span><strong>Cost Acceptance</strong>: I accept the 1R loss as routine business cost for market feedback.</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="check-reset-step3">
+            <span><strong>Invalidation Review</strong>: The market simply invalidated the idea; I have no urge to win money back now.</span>
+          </label>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.75rem; color: var(--ink-muted); font-family: var(--font-mono);">Complete all 3 checks to lift lockout.</span>
+        <button id="btn-unlock-cooldown" class="btn btn-secondary" disabled>Lockout Active (Complete Checks)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trade Entry Modal with 60-Second Guided Debrief & Live Position Sizing -->
+  <div id="trade-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 720px;">
+      <div class="modal-header">
+        <div>
+          <h2>Log Planned Execution</h2>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted);">Includes live sizing, MAE/MFE excursion, and guided debrief.</span>
+        </div>
+        <button id="btn-close-modal" class="close-btn">&times;</button>
+      </div>
+
+      <div id="modal-circuit-alert" class="card" style="display: none; background: #FAECEB; border: 1.5px solid var(--ledger-loss); padding: 0.75rem; margin-bottom: 1rem;">
+        <strong style="color: var(--ledger-loss); font-family: var(--font-serif);">⚠ Circuit Breaker Warning:</strong>
+        <div id="modal-circuit-text" style="font-size: 0.8rem; color: var(--ink-secondary); margin-top: 0.25rem;"></div>
+      </div>
+      <div id="demo-practice-notice" class="demo-practice-notice" style="display: none;" role="status">
+        DEMO PRACTICE ONLY. This creates a simulated journal record; it does not connect to a broker or place an order.
+      </div>
+
+      <form id="trade-entry-form">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Asset Class</label>
+            <select id="form-asset-class" class="form-control">
+              <option value="EQUITY">Equities / Stocks</option>
+              <option value="FOREX">Forex</option>
+              <option value="FUTURES">Futures</option>
+              <option value="CRYPTO">Cryptocurrency</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Symbol / Ticker</label>
+            <input type="text" id="form-symbol" class="form-control" placeholder="e.g. EURUSD, NVDA, ES" required>
+          </div>
+
+          <div class="form-group">
+            <label>Direction</label>
+            <select id="form-direction" class="form-control">
+              <option value="LONG">LONG (Buy)</option>
+              <option value="SHORT">SHORT (Sell)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Playbook Setup</label>
+            <select id="form-setup" class="form-control">
+              <option value="BREAKOUT_RETEST">Breakout & Retest</option>
+              <option value="TREND_PULLBACK">Trend Continuation Pullback</option>
+              <option value="LIQUIDITY_SWEEP">Liquidity Sweep / Pin Bar</option>
+              <option value="GOLD_OTE_15M">Gold OTE Continuation (D/4H to 15M)</option>
+              <option value="GOLD_TREND_5M">Gold OTE Intraday (D/1H to 5M)</option>
+              <option value="DISCRETIONARY">Discretionary / Impulse</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Entry Price</label>
+            <input type="number" step="any" id="form-entry-price" class="form-control" placeholder="100.00" required>
+          </div>
+
+          <div class="form-group">
+            <label>Stop Loss Price</label>
+            <input type="number" step="any" id="form-stop-loss" class="form-control" placeholder="98.00" required>
+          </div>
+
+          <div class="form-group">
+            <label>Take Profit Price</label>
+            <input type="number" step="any" id="form-take-profit" class="form-control" placeholder="105.00">
+          </div>
+
+          <div class="form-group">
+            <label>Exit / Fill Price (Optional)</label>
+            <input type="number" step="any" id="form-exit-price" class="form-control" placeholder="Leave blank if open">
+          </div>
+
+          <div class="form-group">
+            <label>MAE Price (Worst Drawdown Dip)</label>
+            <input type="number" step="any" id="form-mae-price" class="form-control" placeholder="e.g. 98.80">
+            <span style="font-size: 0.7rem; color: var(--ink-muted);" id="form-mae-r-preview">MAE: 0.00R</span>
+          </div>
+
+          <div class="form-group">
+            <label>MFE Price (Peak Upside Reached)</label>
+            <input type="number" step="any" id="form-mfe-price" class="form-control" placeholder="e.g. 104.50">
+            <span style="font-size: 0.7rem; color: var(--ink-muted);" id="form-mfe-r-preview">MFE: 0.00R</span>
+          </div>
+
+          <div class="form-group">
+            <label>Account Balance ($)</label>
+            <input type="number" id="form-account-balance" class="form-control" value="10000">
+          </div>
+
+          <div class="form-group">
+            <label>Risk Per Trade (%)</label>
+            <input type="number" step="0.1" id="form-risk-percent" class="form-control" value="1.0">
+          </div>
+        </div>
+
+        <!-- Position Sizing Preview -->
+        <div class="calculator-preview" id="calc-preview">
+          <div><strong>Position Sizing Calculation:</strong></div>
+          <div id="calc-details" style="margin-top: 0.35rem; color: var(--ink-secondary);">
+            Enter Entry and Stop Loss prices to compute position size.
+          </div>
+        </div>
+
+        <!-- Dynamic Prop Firm Runway Warning Alert -->
+        <div id="modal-runway-alert" class="runway-box" style="display: none; margin-top: 0.75rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong style="font-size: 0.85rem; font-family: var(--font-serif);">🛡️ Prop Firm Runway Check:</strong>
+            <span id="modal-runway-badge" class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">WITHIN SAFE BUFFER</span>
+          </div>
+          <div id="modal-runway-text" style="font-size: 0.8rem; color: var(--ink-secondary); margin-top: 0.35rem;">
+            Remaining Daily Cushion: 50.00 (1.5R) | Maximum Recommended Risk: 81.25.
+          </div>
+        </div>
+
+        <!-- Pre-Flight Confluence Gatekeeper Card -->
+        <div class="card" id="modal-confluence-card" style="background: var(--ledger-paper-subtle); border: 1.5px solid var(--accent-brass); margin: 1.25rem 0 0.75rem 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div>
+              <span class="rubber-stamp stamp-clean" style="font-size: 0.7rem;">PRE-FLIGHT GATE</span>
+              <strong style="margin-left: 0.5rem; font-family: var(--font-serif); font-size: 1.05rem;">Playbook Setup Confluence</strong>
+            </div>
+            <div id="modal-confluence-badge" class="rubber-stamp stamp-clean">A+ SETUP (100%)</div>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Verify non-negotiable criteria before pulling the trigger. Missing items flag this trade as off-playbook impulse.
+          </p>
+          <div id="modal-confluence-items" style="display: grid; gap: 0.45rem;">
+            <!-- Populated via JS based on selected setup -->
+          </div>
+        </div>
+
+        <!-- 60-Second Guided Post-Trade Debrief Card -->
+        <div class="card" style="background: var(--ledger-paper-subtle); border: 1.5px solid var(--ink-primary); margin: 1.25rem 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div>
+              <span class="rubber-stamp stamp-clean" style="font-size: 0.7rem;">60-SECOND DEBRIEF</span>
+              <strong style="margin-left: 0.5rem; font-family: var(--font-serif); font-size: 1.1rem;">Execution & Mindset Audit</strong>
+            </div>
+            <div id="debrief-live-grade" class="rubber-stamp stamp-clean">GRADE: A (100)</div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label>1. Execution Integrity</label>
+              <select id="debrief-integrity" class="form-control">
+                <option value="FOLLOWED_PLAN">Followed Plan Exactly (Patient Entry)</option>
+                <option value="CHASED_EARLY">Chased / Entered Early (FOMO)</option>
+                <option value="HESITATED_LATE">Hesitated / Entered Late (Poor Fill)</option>
+                <option value="IMPULSE_NO_SETUP">Impulsive / No Defined Setup</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>2. In-Trade Management</label>
+              <select id="debrief-management" class="form-control">
+                <option value="LEFT_UNTOUCHED">Left Stop & Target Untouched</option>
+                <option value="SCALED_CORRECTLY">Managed / Scaled Per Plan</option>
+                <option value="CLOSED_PREMATURELY">Closed Winner Prematurely (Fear)</option>
+                <option value="MOVED_STOP_WIDER">Moved Stop Loss Wider / Removed Stop</option>
+              </select>
+            </div>
+
+            <div class="form-group full">
+              <label>3. Emotional Temperature</label>
+              <select id="debrief-emotion" class="form-control">
+                <option value="CALM_DETACHED">Calm & Detached (1-2/5 Anxiety)</option>
+                <option value="MODERATE_TENSION">Moderate Tension (3/5 Anxiety)</option>
+                <option value="HIGH_ANXIETY_GLUED">High Anxiety / Glued to P&L (4-5/5)</option>
+                <option value="ANGER_REVENGE">Anger / Strong Urge to Win Money Back</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Calculated Quantity (Shares/Lots/Contracts)</label>
+            <input type="number" step="any" id="form-quantity" class="form-control" value="1" required>
+          </div>
+
+          <div class="form-group">
+            <label>Pre-Session Completed?</label>
+            <select id="form-presession-status" class="form-control">
+              <option value="true">Yes (Morning Audit Completed)</option>
+              <option value="false">No (Unprepared Session)</option>
+            </select>
+          </div>
+
+          <div class="form-group full">
+            <label>Brief Rationale or Reflection</label>
+            <textarea id="form-notes" class="form-control" rows="2" placeholder="Key confluence, chart reasoning, or lesson learned..."></textarea>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
+          <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Record in Ledger</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>

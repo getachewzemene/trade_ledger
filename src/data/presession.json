@@ -1,0 +1,32 @@
+[
+  {
+    "id": "PRE-2026-09-21",
+    "date": "2026-09-21T08:00:00Z",
+    "higherTimeframeBias": "BULLISH",
+    "newsChecked": true,
+    "maxDailyLossRiskR": 2.0,
+    "mentalReadiness": "CALM",
+    "completed": true,
+    "notes": "London session open. Daily DXY breaking down, EURUSD higher-low intact."
+  },
+  {
+    "id": "PRE-2026-09-22",
+    "date": "2026-09-22T13:30:00Z",
+    "higherTimeframeBias": "BULLISH",
+    "newsChecked": true,
+    "maxDailyLossRiskR": 2.0,
+    "mentalReadiness": "HESITANT",
+    "completed": true,
+    "notes": "Tech earnings volatility expected on NVDA. Plan to trade smaller."
+  },
+  {
+    "id": "PRE-2026-10-02",
+    "date": "2026-10-02T08:00:00Z",
+    "higherTimeframeBias": "BULLISH",
+    "newsChecked": true,
+    "maxDailyLossRiskR": 2.0,
+    "mentalReadiness": "CALM",
+    "completed": true,
+    "notes": "Today's pre-market audit complete. NFP release later today, stay nimble."
+  }
+]
