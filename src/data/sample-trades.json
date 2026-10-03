@@ -22,7 +22,8 @@
     "preSessionCompleted": true,
     "notes": "London session breakout above key resistance with retest pin bar.",
     "violations": [],
-    "source": "MANUAL",
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE",
     "screenshotUrl": "sample-chart-1.png"
   },
   {
@@ -48,7 +49,8 @@
     "preSessionCompleted": true,
     "notes": "Price breached 121.00 stop, moved stop lower hoping for bounce.",
     "violations": ["STOP_WIDENED"],
-    "source": "MANUAL"
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE"
   },
   {
     "id": "TR-1003",
@@ -73,7 +75,8 @@
     "preSessionCompleted": true,
     "notes": "Angry after losing on NVDA long; flipped short with 2.5x size 8 minutes later.",
     "violations": ["REVENGE_TRADE", "OVERSIZED_POSITION"],
-    "source": "MANUAL"
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE"
   },
   {
     "id": "TR-1004",
@@ -98,7 +101,8 @@
     "preSessionCompleted": true,
     "notes": "Closed early at +4.5 pts; market subsequently reached +12.25 pts (MFE 2.45R).",
     "violations": ["EARLY_EXIT"],
-    "source": "MANUAL",
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE",
     "screenshotUrl": "sample-chart-2.png"
   },
   {
@@ -124,7 +128,8 @@
     "preSessionCompleted": true,
     "notes": "Retest of 4-hour support level confirmed with bullish engulfing candle.",
     "violations": [],
-    "source": "MANUAL",
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE",
     "screenshotUrl": "sample-chart-3.png"
   },
   {
@@ -150,7 +155,8 @@
     "preSessionCompleted": true,
     "notes": "High impact news spike hit stop loss. Respected stop cleanly.",
     "violations": [],
-    "source": "MANUAL"
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE"
   },
   {
     "id": "TR-1007",
@@ -175,7 +181,8 @@
     "preSessionCompleted": true,
     "notes": "Patience paid off. Held full position until afternoon target was reached.",
     "violations": [],
-    "source": "MANUAL",
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE",
     "screenshotUrl": "sample-chart-4.png"
   },
   {
@@ -201,6 +208,7 @@
     "preSessionCompleted": false,
     "notes": "Entered without pre-market prep or hard stop order. Uncontrolled loss.",
     "violations": ["NO_STOP_LOSS", "STOP_WIDENED", "UNPREPARED_SESSION"],
-    "source": "MANUAL"
+    "source": "SAMPLE",
+    "executionMode": "SAMPLE"
   }
 ]

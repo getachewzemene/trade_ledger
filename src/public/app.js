@@ -33,8 +33,24 @@ import {
 } from '../engine/prop-firm.js';
 import { createSessionState, saveSessionState, loadSessionState, clearSessionState, isSessionActive, saveProfileData, loadProfileData } from '../engine/session.js';
 import { DEFAULT_PLAN_RULES, DEFAULT_TRADING_PLAN, normalizeTradingPlan, evaluatePlanReadiness, evaluatePlanTradeLimits } from '../engine/trading-plan.js';
-import { renderCandlestickPatternChart, renderLessonTopicChart } from '../engine/lesson-charts.js';
-import { filterPerformanceTrades, isDemoTrade, isSampleTrade, normalizeTradeSource, tagLegacySampleTrades } from '../engine/trade-provenance.js';
+import { 
+  TRADE_CATEGORIES,
+  TRADE_SOURCES,
+  normalizeTradeSource,
+  getTradeCategory,
+  isSampleTrade,
+  isSimulatedTrade,
+  isDemoTrade,
+  isImportedTrade,
+  isPersonalTrade,
+  filterPerformanceTrades,
+  filterTradesByCategory,
+  getTradeSourceLabel,
+  getTradeSourceBadgeClass,
+  getModeBannerText,
+  tagLegacySampleTrades,
+  tagTradesWithSource
+} from '../engine/trade-provenance.js';
 
 // Application State
 let trades = [];
@@ -69,22 +85,21 @@ function getPerformanceTrades() {
 
 function getVisibleJournalTrades() {
   const sourceFilter = document.getElementById('filter-trade-source')?.value || 'PERSONAL';
-  if (sourceFilter === 'SAMPLE') return sampleTrades;
-  if (sourceFilter === 'DEMO') return trades.filter(isDemoTrade);
-  return trades.filter(trade => !isDemoTrade(trade) && !isSampleTrade(trade));
-}
-
-function getTradeSourceLabel(trade) {
-  const source = normalizeTradeSource(trade.source);
-  const labels = {
-    MANUAL: 'PERSONAL',
-    CSV_IMPORT: 'CSV IMPORT',
-    BROKER_IMPORT: 'BROKER IMPORT',
-    DEMO_PRACTICE: 'DEMO',
-    SAMPLE: 'SAMPLE',
-    LEGACY_UNKNOWN: 'LEGACY'
-  };
-  return labels[source] || source;
+  if (sourceFilter === 'SAMPLE') {
+    return sampleTrades && sampleTrades.length > 0 ? sampleTrades : trades.filter(isSampleTrade);
+  }
+  if (sourceFilter === 'SIMULATED' || sourceFilter === 'DEMO') {
+    return trades.filter(isSimulatedTrade);
+  }
+  if (sourceFilter === 'IMPORTED') {
+    return trades.filter(isImportedTrade);
+  }
+  if (sourceFilter === 'ALL') {
+    const existingIds = new Set(trades.map(t => t.id));
+    const extraSamples = (sampleTrades || []).filter(st => !existingIds.has(st.id));
+    return [...trades, ...extraSamples];
+  }
+  return trades.filter(isPersonalTrade);
 }
 
 function persistLocalBackup() {
@@ -460,12 +475,13 @@ function renderDisciplineTape() {
   if (!container) return;
   container.innerHTML = '';
 
-  if (trades.length === 0) {
-    container.innerHTML = `<span class="tape-node" style="color: var(--ink-muted);">No executions recorded yet</span>`;
+  const performanceTrades = getPerformanceTrades();
+  if (performanceTrades.length === 0) {
+    container.innerHTML = `<span class="tape-node" style="color: var(--ink-muted);">No verified personal/imported executions recorded yet</span>`;
     return;
   }
 
-  trades.forEach((trade) => {
+  performanceTrades.forEach((trade) => {
     const isClean = !trade.violations || trade.violations.length === 0;
     const pnl = trade.netPnL || 0;
     const r = trade.rMultiple !== undefined ? trade.rMultiple : (pnl / (trade.plannedRiskDollars || 100));
@@ -507,12 +523,7 @@ function renderTradeTable() {
   const sourceBanner = document.getElementById('trade-source-banner');
   const sourceMode = document.getElementById('filter-trade-source')?.value || 'PERSONAL';
   if (sourceBanner) {
-    const messages = {
-      PERSONAL: 'PERSONAL JOURNAL · Dashboard performance excludes demo practice and sample examples.',
-      DEMO: 'DEMO PRACTICE · Simulated journal records only. They are excluded from personal performance summaries.',
-      SAMPLE: 'SAMPLE EXAMPLES · Read-only educational data. These records are never included in user performance or risk calculations.'
-    };
-    sourceBanner.textContent = messages[sourceMode] || messages.PERSONAL;
+    sourceBanner.textContent = getModeBannerText(sourceMode);
     sourceBanner.className = `trade-source-banner mode-${sourceMode.toLowerCase()}`;
   }
 
@@ -535,6 +546,11 @@ function renderTradeTable() {
 
   tbody.innerHTML = filtered.map(t => {
     const hasViolations = t.violations && t.violations.length > 0;
+    const isSample = isSampleTrade(t);
+    const isSimulated = isSimulatedTrade(t);
+    const sourceLabel = getTradeSourceLabel(t);
+    const sourceBadgeClass = getTradeSourceBadgeClass(t);
+
     const pnl = t.netPnL || 0;
     const pnlClass = pnl >= 0 ? 'gain' : 'loss';
     const pnlFormatted = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
@@ -552,11 +568,15 @@ function renderTradeTable() {
     }
 
     const dateStr = t.entryDate ? new Date(t.entryDate).toLocaleDateString() : '--';
-    const sourceLabel = getTradeSourceLabel(t);
+
+    const rowClassList = [];
+    if (hasViolations) rowClassList.push('row-violation');
+    if (isSample) rowClassList.push('row-sample-trade');
+    if (isSimulated) rowClassList.push('row-simulated-trade');
 
     return `
-      <tr class="${hasViolations ? 'row-violation' : ''}">
-        <td style="font-weight: 600;">${t.id || 'TR-GEN'}</td>
+      <tr class="${rowClassList.join(' ')}">
+        <td style="font-weight: 600;">${isSample ? '<span class="sample-watermark-tag">SAMPLE</span>' : ''}${t.id || 'TR-GEN'}</td>
         <td style="color: var(--ink-muted);">${dateStr}</td>
         <td><span style="font-size: 0.75rem; border: 1px solid var(--ledger-paper-border); padding: 2px 4px; border-radius: 2px;">${t.assetClass || 'EQ'}</span></td>
         <td style="font-weight: 700;">${t.symbol}</td>
@@ -565,12 +585,12 @@ function renderTradeTable() {
         <td>${t.exitPrice ? Number(t.exitPrice).toFixed(2) : '--'}</td>
         <td style="color: var(--ledger-loss);">${t.stopLoss ? Number(t.stopLoss).toFixed(2) : 'NONE'}</td>
         <td>${t.quantity}</td>
-        <td class="pnl-cell ${pnlClass}">${pnlFormatted}</td>
-        <td style="font-weight: 600;">${rFormatted}</td>
+        <td class="pnl-cell ${pnlClass}">${isSample ? '<span class="sample-pnl-tag">SAMPLE</span>' : ''}${pnlFormatted}</td>
+        <td style="font-weight: 600;">${rFormatted}${isSample ? ' <small style="color: #4338CA; font-size: 0.65rem;">(example)</small>' : ''}</td>
         <td>${gradeBadge}</td>
         <td>${stampBadge}</td>
-        <td><span class="trade-source-badge source-${normalizeTradeSource(t.source).toLowerCase()}">${sourceLabel}</span></td>
-        <td style="font-size: 0.75rem; color: var(--ink-secondary);">${t.executionMode === 'DEMO' ? '<span class="rubber-stamp stamp-neutral">DEMO</span> ' : ''}${(t.setupId || 'Discretionary').replaceAll('_', ' ')}</td>
+        <td><span class="trade-source-badge ${sourceBadgeClass}">${sourceLabel}</span></td>
+        <td style="font-size: 0.75rem; color: var(--ink-secondary);">${isSample ? '<span class="rubber-stamp stamp-neutral">EXAMPLE</span> ' : (t.executionMode === 'DEMO' || isSimulated ? '<span class="rubber-stamp stamp-neutral">DEMO</span> ' : '')}${(t.setupId || 'Discretionary').replaceAll('_', ' ')}</td>
         <td>
           <button class="btn btn-secondary btn-sm" onclick="window.openAnnotator('${t.id}')">Markup</button>
         </td>
@@ -881,12 +901,16 @@ function renderGallery() {
 
   galleryGrid.innerHTML = filtered.map(t => {
     const isGain = (t.netPnL || 0) >= 0;
+    const isSample = isSampleTrade(t);
+    const sourceLabel = getTradeSourceLabel(t);
+    const sourceBadgeClass = getTradeSourceBadgeClass(t);
     const rFormatted = (t.rMultiple >= 0 ? '+' : '') + Number(t.rMultiple || 0).toFixed(2) + 'R';
     const chartSvg = renderTradeChartSVG(t);
     const grade = t.disciplineGrade || (isGain ? 'A' : 'C');
 
     return `
-      <div class="gallery-card">
+      <div class="gallery-card ${isSample ? 'card-sample-trade' : ''}">
+        ${isSample ? '<div class="card-sample-notice">SAMPLE EXAMPLE · NOT YOUR TRADING RESULTS</div>' : ''}
         <div class="gallery-preview-box">
           ${chartSvg}
         </div>
@@ -895,10 +919,10 @@ function renderGallery() {
             <div>
               <strong style="font-family: var(--font-serif); font-size: 1.15rem;">${t.symbol}</strong>
               <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted); margin-left: 0.5rem;">${t.direction}</span>
-              <span class="trade-source-badge source-${normalizeTradeSource(t.source).toLowerCase()}">${getTradeSourceLabel(t)}</span>
+              <span class="trade-source-badge ${sourceBadgeClass}">${sourceLabel}</span>
               <span class="rubber-stamp stamp-clean" style="margin-left: 0.5rem;">${grade}</span>
             </div>
-            <span class="pnl-cell ${isGain ? 'gain' : 'loss'}" style="font-size: 1.1rem;">${rFormatted}</span>
+            <span class="pnl-cell ${isGain ? 'gain' : 'loss'}" style="font-size: 1.1rem;">${isSample ? '<span class="sample-pnl-tag">SAMPLE</span>' : ''}${rFormatted}</span>
           </div>
 
           <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
@@ -1443,6 +1467,8 @@ function renderCurriculum() {
 
   viewerContainer.querySelector('.lesson-demo-button')?.addEventListener('click', event => {
     demoPracticeSetupId = event.currentTarget.dataset.setupId;
+    const formSource = document.getElementById('form-trade-source');
+    if (formSource) formSource.value = 'SIMULATED';
     const assetClass = document.getElementById('form-asset-class');
     const symbolInput = document.getElementById('form-symbol');
     const setupSelect = document.getElementById('form-setup');
@@ -1680,6 +1706,10 @@ function setupModal() {
     }
 
     updateCircuitBreakerBanner();
+    const formSource = document.getElementById('form-trade-source');
+    if (formSource) {
+      formSource.value = demoPracticeSetupId ? 'SIMULATED' : 'PERSONAL';
+    }
     const demoNotice = document.getElementById('demo-practice-notice');
     if (demoNotice) demoNotice.style.display = demoPracticeSetupId ? 'block' : 'none';
     modal.classList.add('open');
@@ -1687,9 +1717,20 @@ function setupModal() {
   const closeModal = () => {
     modal.classList.remove('open');
     demoPracticeSetupId = null;
+    const formSource = document.getElementById('form-trade-source');
+    if (formSource) formSource.value = 'PERSONAL';
     const demoNotice = document.getElementById('demo-practice-notice');
     if (demoNotice) demoNotice.style.display = 'none';
   };
+
+  const formSourceEl = document.getElementById('form-trade-source');
+  if (formSourceEl) {
+    formSourceEl.addEventListener('change', () => {
+      const isSim = formSourceEl.value === 'SIMULATED';
+      const demoNotice = document.getElementById('demo-practice-notice');
+      if (demoNotice) demoNotice.style.display = isSim ? 'block' : 'none';
+    });
+  }
 
   if (openBtn) openBtn.addEventListener('click', openModal);
   if (closeBtn) closeBtn.addEventListener('click', closeModal);
@@ -1784,9 +1825,8 @@ function setupModal() {
         disciplineScore: debriefGrade.score,
         preSessionCompleted: isPreSessionDone,
         notes,
-        violations: [...debriefGrade.inferredViolations, ...confluenceResult.inferredViolations],
-        source: demoPracticeSetupId ? 'DEMO_PRACTICE' : 'MANUAL',
-        executionMode: demoPracticeSetupId ? 'DEMO' : 'JOURNAL'
+        source: (document.getElementById('form-trade-source')?.value === 'SIMULATED' || Boolean(demoPracticeSetupId)) ? TRADE_SOURCES.DEMO_PRACTICE : TRADE_SOURCES.MANUAL,
+        executionMode: (document.getElementById('form-trade-source')?.value === 'SIMULATED' || Boolean(demoPracticeSetupId)) ? 'DEMO' : 'JOURNAL'
       };
 
       try {

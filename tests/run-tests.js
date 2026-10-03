@@ -39,7 +39,7 @@ import { buildTradeSummaryReport, buildTradeCsvExport } from '../src/engine/repo
 import { createSessionState, saveSessionState, loadSessionState, clearSessionState, isSessionActive, getProfileStorageKey, saveProfileData, loadProfileData, clearProfileData } from '../src/engine/session.js';
 import { DEFAULT_PLAN_RULES, DEFAULT_TRADING_PLAN, normalizeTradingPlan, evaluatePlanReadiness, evaluatePlanTradeLimits } from '../src/engine/trading-plan.js';
 import { renderCandlestickPatternChart, renderLessonTopicChart } from '../src/engine/lesson-charts.js';
-import { TRADE_SOURCES, filterPerformanceTrades, isDemoTrade, isSampleTrade, normalizeTradeSource, tagLegacySampleTrades, tagTradesWithSource } from '../src/engine/trade-provenance.js';
+import { TRADE_SOURCES, TRADE_CATEGORIES, filterPerformanceTrades, filterTradesByCategory, isDemoTrade, isSimulatedTrade, isSampleTrade, isImportedTrade, isPersonalTrade, getTradeCategory, getTradeSourceLabel, getTradeSourceBadgeClass, getModeBannerText, normalizeTradeSource, tagLegacySampleTrades, tagTradesWithSource } from '../src/engine/trade-provenance.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -577,10 +577,48 @@ console.log('\n--- Suite 16: Trade Provenance & Sample Isolation ---');
   assertEquals(taggedSample.source, 'SAMPLE', 'Bundled examples receive explicit sample provenance');
   assertEquals(isSampleTrade(taggedSample), true, 'Sample records are classified as examples');
   assertEquals(isDemoTrade(demo), true, 'Demo practice records are classified as simulated');
+  assertEquals(isSimulatedTrade(demo), true, 'Demo practice records are classified as simulated via isSimulatedTrade');
   assertEquals(demo.executionMode, 'DEMO', 'Demo source receives a demo execution mode');
   assertEquals(normalizeTradeSource('unknown-old-value'), 'LEGACY_UNKNOWN', 'Unknown legacy sources remain visibly identifiable');
   assertEquals(tagLegacySampleTrades([{ ...sample }], [sample])[0].source, 'SAMPLE', 'Legacy persisted copies of bundled examples are recognized');
   assertEquals(filterPerformanceTrades([taggedSample, demo, personal, imported]).map(trade => trade.id), ['P-1', 'I-1'], 'Performance data excludes sample and demo while retaining personal/imported trades');
+
+  // Four-way source categorization tests
+  assertEquals(getTradeCategory(personal), TRADE_CATEGORIES.PERSONAL, 'Personal record category is PERSONAL');
+  assertEquals(getTradeCategory(imported), TRADE_CATEGORIES.IMPORTED, 'Imported record category is IMPORTED');
+  assertEquals(getTradeCategory(demo), TRADE_CATEGORIES.SIMULATED, 'Demo record category is SIMULATED');
+  assertEquals(getTradeCategory(taggedSample), TRADE_CATEGORIES.SAMPLE, 'Sample record category is SAMPLE');
+
+  assertEquals(isPersonalTrade(personal), true, 'Personal manual trade identified as personal');
+  assertEquals(isPersonalTrade(taggedSample), false, 'Sample trade is not personal');
+  assertEquals(isImportedTrade(imported), true, 'CSV import trade identified as imported');
+  assertEquals(isImportedTrade(personal), false, 'Personal trade is not imported');
+
+  // Category filtering
+  const mixedTrades = [taggedSample, demo, personal, imported];
+  assertEquals(filterTradesByCategory(mixedTrades, 'PERSONAL').map(t => t.id), ['P-1'], 'Category filter isolates personal trades');
+  assertEquals(filterTradesByCategory(mixedTrades, 'IMPORTED').map(t => t.id), ['I-1'], 'Category filter isolates imported trades');
+  assertEquals(filterTradesByCategory(mixedTrades, 'SIMULATED').map(t => t.id), ['D-1'], 'Category filter isolates simulated trades');
+  assertEquals(filterTradesByCategory(mixedTrades, 'SAMPLE').map(t => t.id), ['S-1'], 'Category filter isolates sample trades');
+  assertEquals(filterTradesByCategory(mixedTrades, 'ALL').length, 4, 'Category filter ALL includes all records');
+
+  // Default exclusion of sample trades from performance reports
+  const defaultReport = buildTradeSummaryReport([taggedSample, personal, imported]);
+  assertEquals(defaultReport.totalTrades, 2, 'Performance report excludes sample trade S-1 by default');
+  assertEquals(defaultReport.netPnL, -15, 'Performance report net PnL excludes sample gains by default (-$25 + $10 = -$15)');
+  assert(!defaultReport.csv.includes('S-1'), 'CSV export excludes sample records by default');
+
+  const explicitSampleReport = buildTradeSummaryReport([taggedSample, personal, imported], { excludeSample: false });
+  assertEquals(explicitSampleReport.totalTrades, 3, 'Report includes sample only when explicitly requested');
+  assertEquals(explicitSampleReport.netPnL, 485, 'Explicit sample report includes sample PnL');
+
+  // Mode banners and badge classes
+  assert(getModeBannerText('SAMPLE').includes('SAMPLE EXAMPLES') && getModeBannerText('SAMPLE').includes('STRICTLY EXCLUDED'), 'Sample mode banner warns about educational data exclusion');
+  assert(getModeBannerText('PERSONAL').includes('PERSONAL JOURNAL'), 'Personal mode banner clarifies scope');
+  assert(getTradeSourceBadgeClass(taggedSample).includes('source-sample'), 'Badge class for sample record contains source-sample');
+  assert(getTradeSourceBadgeClass(demo).includes('source-simulated'), 'Badge class for demo record contains source-simulated');
+  assert(getTradeSourceBadgeClass(imported).includes('source-imported'), 'Badge class for imported record contains source-imported');
+  assert(getTradeSourceBadgeClass(personal).includes('source-personal'), 'Badge class for personal record contains source-personal');
 }
 
 console.log('\n================================================================');

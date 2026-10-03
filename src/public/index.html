@@ -51,6 +51,10 @@
   </header>
 
   <section class="dashboard-summary">
+    <div id="dashboard-mode-banner" class="dashboard-mode-banner">
+      <span class="badge-source-verified">VERIFIED PERFORMANCE</span>
+      <span>Dashboard reports reflect your <strong>Personal &amp; Imported</strong> trades. Sample examples and simulated practice trades are excluded by default.</span>
+    </div>
     <div class="summary-grid">
       <div class="summary-card">
         <span class="summary-label">Total trades</span>
@@ -107,10 +111,12 @@
             <option value="CLEAN">Clean Trades Only</option>
             <option value="VIOLATIONS">With Violations</option>
           </select>
-          <select id="filter-trade-source" class="form-control" aria-label="Trade data source" style="width: 170px;">
+          <select id="filter-trade-source" class="form-control" aria-label="Trade data source" style="width: 175px;">
             <option value="PERSONAL">Personal Trades</option>
-            <option value="DEMO">Demo Practice</option>
+            <option value="IMPORTED">Imported Trades</option>
+            <option value="SIMULATED">Simulated / Demo</option>
             <option value="SAMPLE">Sample Examples</option>
+            <option value="ALL">All Sources</option>
           </select>
         </div>
       </div>
@@ -1008,6 +1014,14 @@
 
       <form id="trade-entry-form">
         <div class="form-grid">
+          <div class="form-group">
+            <label>Record Source / Type</label>
+            <select id="form-trade-source" class="form-control">
+              <option value="PERSONAL">Personal Trade (Live Journal)</option>
+              <option value="SIMULATED">Simulated Trade (Demo Practice)</option>
+            </select>
+          </div>
+
           <div class="form-group">
             <label>Asset Class</label>
             <select id="form-asset-class" class="form-control">

@@ -82,8 +82,9 @@ export function calculateForexSize(symbol, entryPrice, stopLoss, riskBudget, cus
     return { lots: 0, pips: Math.round(pips * 10) / 10, pipValuePerLot: 0, riskBudget, estimatedRisk: 0, supported: false, reason: 'Pip value must be a positive number.' };
   }
 
-  const rawLots = riskBudget / (pips * pipValuePerLot);
-  const lots = Math.floor((rawLots + Number.EPSILON) / lotStep) * lotStep;
+  const roundedPips = Math.round(pips * 1000) / 1000;
+  const rawLots = riskBudget / (roundedPips * pipValuePerLot);
+  const lots = Number((Math.floor((rawLots + 1e-6) / lotStep) * lotStep).toFixed(4));
 
   return {
     lots,

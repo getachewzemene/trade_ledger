@@ -182,10 +182,22 @@ const server = http.createServer((req, res) => {
         }
 
         const requestedSource = String(trade.source || '').toUpperCase();
+        let targetSource = TRADE_SOURCES.MANUAL;
+        let targetMode = 'JOURNAL';
+        if (requestedSource === TRADE_SOURCES.DEMO_PRACTICE || requestedSource === TRADE_SOURCES.SIMULATED) {
+          targetSource = TRADE_SOURCES.DEMO_PRACTICE;
+          targetMode = 'DEMO';
+        } else if (requestedSource === TRADE_SOURCES.CSV_IMPORT || requestedSource === TRADE_SOURCES.BROKER_IMPORT || requestedSource === TRADE_SOURCES.IMPORTED) {
+          targetSource = TRADE_SOURCES.CSV_IMPORT;
+          targetMode = 'JOURNAL';
+        } else if (requestedSource === TRADE_SOURCES.SAMPLE) {
+          targetSource = TRADE_SOURCES.SAMPLE;
+          targetMode = 'SAMPLE';
+        }
         const safeTrade = {
           ...trade,
-          source: requestedSource === TRADE_SOURCES.DEMO_PRACTICE ? TRADE_SOURCES.DEMO_PRACTICE : TRADE_SOURCES.MANUAL,
-          executionMode: requestedSource === TRADE_SOURCES.DEMO_PRACTICE ? 'DEMO' : 'JOURNAL'
+          source: targetSource,
+          executionMode: targetMode
         };
 
         // Attach confluence evaluation if setup provided
@@ -434,7 +446,8 @@ const server = http.createServer((req, res) => {
 
   // GET /api/reports/summary
   if (pathname === '/api/reports/summary' && req.method === 'GET') {
-    const report = buildTradeSummaryReport(getPerformanceTrades());
+    const includeSample = parsedUrl.searchParams.get('includeSample') === 'true';
+    const report = buildTradeSummaryReport(activeTrades, { excludeSample: !includeSample });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(report));
     return;
@@ -443,8 +456,9 @@ const server = http.createServer((req, res) => {
   // GET /api/reports/export
   if (pathname === '/api/reports/export' && req.method === 'GET') {
     const format = parsedUrl.searchParams.get('format') || 'json';
+    const includeSample = parsedUrl.searchParams.get('includeSample') === 'true';
     if (format === 'csv') {
-      const csv = buildTradeCsvExport(getPerformanceTrades());
+      const csv = buildTradeCsvExport(activeTrades, { excludeSample: !includeSample });
       res.writeHead(200, {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="ledger_report_${new Date().toISOString().slice(0, 10)}.csv"`
@@ -453,7 +467,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    const report = buildTradeSummaryReport(getPerformanceTrades());
+    const report = buildTradeSummaryReport(activeTrades, { excludeSample: !includeSample });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(report));
     return;
