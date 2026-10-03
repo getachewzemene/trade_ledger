@@ -34,9 +34,11 @@ import {
 import { createSessionState, saveSessionState, loadSessionState, clearSessionState, isSessionActive, saveProfileData, loadProfileData } from '../engine/session.js';
 import { DEFAULT_PLAN_RULES, DEFAULT_TRADING_PLAN, normalizeTradingPlan, evaluatePlanReadiness, evaluatePlanTradeLimits } from '../engine/trading-plan.js';
 import { renderCandlestickPatternChart, renderLessonTopicChart } from '../engine/lesson-charts.js';
+import { filterPerformanceTrades, isDemoTrade, isSampleTrade, normalizeTradeSource, tagLegacySampleTrades } from '../engine/trade-provenance.js';
 
 // Application State
 let trades = [];
+let sampleTrades = [];
 let activeLessonId = 'lesson-1';
 let curriculumData = [];
 let tradingContract = { ...DEFAULT_TRADING_CONTRACT };
@@ -60,6 +62,30 @@ let tradingPlan = normalizeTradingPlan(DEFAULT_TRADING_PLAN);
 let planChecklist = { date: new Date().toISOString().slice(0, 10), checkedIds: [] };
 let demoPracticeSetupId = null;
 const BACKUP_STORAGE_KEY = 'ledger-and-wick-local-backup-v1';
+
+function getPerformanceTrades() {
+  return filterPerformanceTrades(trades);
+}
+
+function getVisibleJournalTrades() {
+  const sourceFilter = document.getElementById('filter-trade-source')?.value || 'PERSONAL';
+  if (sourceFilter === 'SAMPLE') return sampleTrades;
+  if (sourceFilter === 'DEMO') return trades.filter(isDemoTrade);
+  return trades.filter(trade => !isDemoTrade(trade) && !isSampleTrade(trade));
+}
+
+function getTradeSourceLabel(trade) {
+  const source = normalizeTradeSource(trade.source);
+  const labels = {
+    MANUAL: 'PERSONAL',
+    CSV_IMPORT: 'CSV IMPORT',
+    BROKER_IMPORT: 'BROKER IMPORT',
+    DEMO_PRACTICE: 'DEMO',
+    SAMPLE: 'SAMPLE',
+    LEGACY_UNKNOWN: 'LEGACY'
+  };
+  return labels[source] || source;
+}
 
 function persistLocalBackup() {
   if (typeof window === 'undefined' || !window.localStorage) return;
@@ -128,7 +154,7 @@ function loadCurrentUserProfile() {
   }
 
   if (Array.isArray(profile.trades)) {
-    trades = profile.trades;
+    trades = tagLegacySampleTrades(profile.trades, sampleTrades);
   }
   if (profile.tradingContract) {
     tradingContract = { ...tradingContract, ...profile.tradingContract };
@@ -192,9 +218,9 @@ function renderTradingPlan(populateForm = false) {
     status.textContent = `${readiness.completedCount} / ${readiness.totalCount} complete`;
     status.classList.toggle('ready', readiness.ready);
   }
-  if (summary) {
-    const limits = evaluatePlanTradeLimits({ plan: tradingPlan, trades, candidateRiskPercent: 0 });
-    summary.textContent = `Today: ${limits.todayTradesCount}/${tradingPlan.maxDailyTrades} trades | ${limits.todayLossR.toFixed(2)}R / ${tradingPlan.maxDailyLossR}R loss stop | ${tradingPlan.maxRiskPercent}% max risk | 1:${tradingPlan.minimumRewardRisk} minimum R:R`;
+    if (summary) {
+      const limits = evaluatePlanTradeLimits({ plan: tradingPlan, trades: getPerformanceTrades(), candidateRiskPercent: 0 });
+      summary.textContent = `Today: ${limits.todayTradesCount}/${tradingPlan.maxDailyTrades} trades | ${limits.todayLossR.toFixed(2)}R / ${tradingPlan.maxDailyLossR}R loss stop | ${tradingPlan.maxRiskPercent}% max risk | 1:${tradingPlan.minimumRewardRisk} minimum R:R`;
   }
 }
 
@@ -366,16 +392,19 @@ async function initApp() {
 
   // Load Initial Data from REST API
   try {
-    const [tradesRes, currRes, contractRes, preRes] = await Promise.all([
+    const [tradesRes, currRes, contractRes, preRes, samplesRes] = await Promise.all([
       fetch('/api/trades'),
       fetch('/api/curriculum'),
       fetch('/api/contract'),
-      fetch('/api/presession')
+      fetch('/api/presession'),
+      fetch('/api/sample-trades')
     ]);
     trades = await tradesRes.json();
     curriculumData = await currRes.json();
     tradingContract = await contractRes.json();
     preSessionLogs = await preRes.json();
+    sampleTrades = await samplesRes.json();
+    trades = tagLegacySampleTrades(trades, sampleTrades);
 
     if (trades.length === 0 && localBackup) {
       trades = localBackup.trades || [];
@@ -384,9 +413,10 @@ async function initApp() {
     }
   } catch (err) {
     console.warn('API fetch failed, falling back to defaults', err);
-    trades = localBackup?.trades || [];
+    trades = tagLegacySampleTrades(localBackup?.trades || [], sampleTrades);
     tradingContract = { ...tradingContract, ...(localBackup?.tradingContract || {}) };
     preSessionLogs = localBackup?.preSessionLogs || [];
+    sampleTrades = [];
   }
 
   window.addEventListener('beforeunload', persistLocalBackup);
@@ -474,11 +504,23 @@ function renderTradeTable() {
   const tbody = document.getElementById('trade-table-body');
   if (!tbody) return;
 
+  const sourceBanner = document.getElementById('trade-source-banner');
+  const sourceMode = document.getElementById('filter-trade-source')?.value || 'PERSONAL';
+  if (sourceBanner) {
+    const messages = {
+      PERSONAL: 'PERSONAL JOURNAL · Dashboard performance excludes demo practice and sample examples.',
+      DEMO: 'DEMO PRACTICE · Simulated journal records only. They are excluded from personal performance summaries.',
+      SAMPLE: 'SAMPLE EXAMPLES · Read-only educational data. These records are never included in user performance or risk calculations.'
+    };
+    sourceBanner.textContent = messages[sourceMode] || messages.PERSONAL;
+    sourceBanner.className = `trade-source-banner mode-${sourceMode.toLowerCase()}`;
+  }
+
   const search = (document.getElementById('filter-search')?.value || '').toUpperCase();
   const assetFilter = document.getElementById('filter-asset')?.value || 'ALL';
   const violationFilter = document.getElementById('filter-violations')?.value || 'ALL';
 
-  const filtered = trades.filter(t => {
+  const filtered = getVisibleJournalTrades().filter(t => {
     if (assetFilter !== 'ALL' && t.assetClass !== assetFilter) return false;
     if (violationFilter === 'CLEAN' && t.violations && t.violations.length > 0) return false;
     if (violationFilter === 'VIOLATIONS' && (!t.violations || t.violations.length === 0)) return false;
@@ -487,7 +529,7 @@ function renderTradeTable() {
   });
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="15" style="text-align: center; color: var(--ink-muted); padding: 2rem;">No matching trades found in ledger.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: var(--ink-muted); padding: 2rem;">No matching trades found in this source view.</td></tr>`;
     return;
   }
 
@@ -510,6 +552,7 @@ function renderTradeTable() {
     }
 
     const dateStr = t.entryDate ? new Date(t.entryDate).toLocaleDateString() : '--';
+    const sourceLabel = getTradeSourceLabel(t);
 
     return `
       <tr class="${hasViolations ? 'row-violation' : ''}">
@@ -526,6 +569,7 @@ function renderTradeTable() {
         <td style="font-weight: 600;">${rFormatted}</td>
         <td>${gradeBadge}</td>
         <td>${stampBadge}</td>
+        <td><span class="trade-source-badge source-${normalizeTradeSource(t.source).toLowerCase()}">${sourceLabel}</span></td>
         <td style="font-size: 0.75rem; color: var(--ink-secondary);">${t.executionMode === 'DEMO' ? '<span class="rubber-stamp stamp-neutral">DEMO</span> ' : ''}${(t.setupId || 'Discretionary').replaceAll('_', ' ')}</td>
         <td>
           <button class="btn btn-secondary btn-sm" onclick="window.openAnnotator('${t.id}')">Markup</button>
@@ -539,7 +583,7 @@ function renderTradeTable() {
  * 3. Render Leak Diagnostics
  */
 function renderLeakDiagnostics() {
-  const diag = calculateLeakDiagnostics(trades);
+  const diag = calculateLeakDiagnostics(getPerformanceTrades());
 
   const elDrain = document.getElementById('stat-leak-drain');
   const elScore = document.getElementById('stat-discipline-score');
@@ -579,7 +623,8 @@ function renderLeakDiagnostics() {
  * 4. Render Executive Dashboard Summary
  */
 function renderDashboardSummary() {
-  const report = buildTradeSummaryReport(trades);
+  const performanceTrades = getPerformanceTrades();
+  const report = buildTradeSummaryReport(performanceTrades);
   const summaryEls = [
     ['summary-total-trades', `${report.totalTrades} trades`],
     ['summary-win-rate', `${report.winRate}%`],
@@ -595,7 +640,7 @@ function renderDashboardSummary() {
   const reportPanel = document.getElementById('report-summary-panel');
   if (!reportPanel) return;
 
-  const recentTrades = [...trades].slice(-3).map((trade) => {
+  const recentTrades = [...performanceTrades].slice(-3).map((trade) => {
     const pnl = Number(trade.netPnL || 0);
     return `• ${trade.symbol} ${trade.direction} — ${pnl >= 0 ? '+$' : '-$'}${Math.abs(pnl).toFixed(2)} / ${trade.disciplineGrade || 'N/A'}`;
   }).join('<br>');
@@ -615,7 +660,8 @@ function renderDashboardSummary() {
 }
 
 function renderPerformanceMetrics() {
-  const metrics = calculatePerformanceMetrics(trades);
+  const performanceTrades = getPerformanceTrades();
+  const metrics = calculatePerformanceMetrics(performanceTrades);
 
   const setVal = (id, val, cls) => {
     const el = document.getElementById(id);
@@ -638,7 +684,7 @@ function renderPerformanceMetrics() {
   setVal('metric-drawdown', `-${metrics.maxDrawdownPercent.toFixed(1)}%`, 'loss');
   document.getElementById('metric-drawdown-dollars').textContent = `-$${metrics.maxDrawdownDollars.toFixed(2)} peak to trough`;
 
-  const assetGroups = groupTradesBy(trades, 'assetClass');
+  const assetGroups = groupTradesBy(performanceTrades, 'assetClass');
   const assetTbody = document.getElementById('table-asset-breakdown');
   if (assetTbody) {
     assetTbody.innerHTML = assetGroups.map(g => `
@@ -652,7 +698,7 @@ function renderPerformanceMetrics() {
     `).join('');
   }
 
-  const setupGroups = groupTradesBy(trades, 'setupId');
+  const setupGroups = groupTradesBy(performanceTrades, 'setupId');
   const setupTbody = document.getElementById('table-setup-breakdown');
   if (setupTbody) {
     setupTbody.innerHTML = setupGroups.map(g => `
@@ -671,7 +717,7 @@ function renderPerformanceMetrics() {
  * 5. Render MAE & MFE Excursion Diagnostics
  */
 function renderExcursionDiagnostics() {
-  const excursion = analyzeExcursionPatterns(trades);
+  const excursion = analyzeExcursionPatterns(getPerformanceTrades());
 
   const elMae = document.getElementById('stat-avg-win-mae');
   const elMfe = document.getElementById('stat-avg-win-mfe');
@@ -695,7 +741,7 @@ function renderExcursionDiagnostics() {
  * 6. Render Monte Carlo Streak Simulator
  */
 function renderMonteCarloSimulation() {
-  const metrics = calculatePerformanceMetrics(trades);
+  const metrics = calculatePerformanceMetrics(getPerformanceTrades());
   const winRate = metrics.winRate > 0 ? metrics.winRate : 50;
   const sim = simulateLosingStreakProbabilities({ winRatePercent: winRate, tradesCount: 100, iterations: 1000 });
 
@@ -752,7 +798,7 @@ function setupTiltShield() {
 }
 
 function checkTiltOnLoad() {
-  const tilt = evaluateTiltState(trades, tradingContract.cooldownMinutes);
+  const tilt = evaluateTiltState(getPerformanceTrades(), tradingContract.cooldownMinutes);
   const statusBtn = document.getElementById('btn-tilt-status');
   const modal = document.getElementById('tilt-shield-modal');
   const timerDisplay = document.getElementById('tilt-timer-display');
@@ -826,7 +872,7 @@ function renderGallery() {
   if (!galleryGrid) return;
 
   const filterSetup = document.getElementById('gallery-filter-setup')?.value || 'ALL';
-  const filtered = trades.filter(t => filterSetup === 'ALL' || t.setupId === filterSetup);
+  const filtered = getVisibleJournalTrades().filter(t => filterSetup === 'ALL' || t.setupId === filterSetup);
 
   if (filtered.length === 0) {
     galleryGrid.innerHTML = `<div class="card full" style="text-align: center; color: var(--ink-muted); padding: 3rem;">No trade charts matching selected setup.</div>`;
@@ -849,6 +895,7 @@ function renderGallery() {
             <div>
               <strong style="font-family: var(--font-serif); font-size: 1.15rem;">${t.symbol}</strong>
               <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted); margin-left: 0.5rem;">${t.direction}</span>
+              <span class="trade-source-badge source-${normalizeTradeSource(t.source).toLowerCase()}">${getTradeSourceLabel(t)}</span>
               <span class="rubber-stamp stamp-clean" style="margin-left: 0.5rem;">${grade}</span>
             </div>
             <span class="pnl-cell ${isGain ? 'gain' : 'loss'}" style="font-size: 1.1rem;">${rFormatted}</span>
@@ -1098,7 +1145,7 @@ function renderContract() {
 
 function updateCircuitBreakerBanner() {
   const circuit = evaluateCircuitBreaker({
-    trades,
+    trades: getPerformanceTrades(),
     contract: tradingContract,
     candidateTradeDate: new Date().toISOString(),
     preSessionLogs
@@ -1160,7 +1207,8 @@ function drawEquityCurve() {
     ctx.stroke();
   }
 
-  if (trades.length === 0) {
+  const performanceTrades = getPerformanceTrades();
+  if (performanceTrades.length === 0) {
     ctx.fillStyle = '#7D766D';
     ctx.font = '14px JetBrains Mono';
     ctx.fillText('Log trades to plot equity and drawdown curves', w / 2 - 150, h / 2);
@@ -1169,7 +1217,7 @@ function drawEquityCurve() {
 
   let runningEquity = 10000;
   const points = [{ x: 0, equity: 10000 }];
-  trades.forEach(t => {
+  performanceTrades.forEach(t => {
     runningEquity += (t.netPnL || 0);
     points.push({ x: 0, equity: runningEquity });
   });
@@ -1612,7 +1660,8 @@ function setupModal() {
 
   const openModal = () => {
     // Check if tilt cooldown is active
-    const tilt = evaluateTiltState(trades, tradingContract.cooldownMinutes);
+    const performanceTrades = getPerformanceTrades();
+    const tilt = evaluateTiltState(performanceTrades, tradingContract.cooldownMinutes);
     if (tilt.isCooldownRequired && tilt.minutesRemaining > 0) {
       document.getElementById('tilt-shield-modal')?.classList.add('open');
       return;
@@ -1620,7 +1669,7 @@ function setupModal() {
 
     planChecklist = normalizePlanChecklist(planChecklist, tradingPlan);
     const readiness = evaluatePlanReadiness(tradingPlan, planChecklist.checkedIds);
-    const planLimits = evaluatePlanTradeLimits({ plan: tradingPlan, trades });
+    const planLimits = evaluatePlanTradeLimits({ plan: tradingPlan, trades: performanceTrades });
     if (!readiness.ready || !planLimits.canTrade) {
       const reason = !readiness.ready
         ? `Complete today's trading plan checklist (${readiness.completedCount}/${readiness.totalCount}) before logging a trade.`
@@ -1667,7 +1716,7 @@ function setupModal() {
       const maePrice = parseFloat(document.getElementById('form-mae-price').value) || undefined;
       const mfePrice = parseFloat(document.getElementById('form-mfe-price').value) || undefined;
 
-      const planLimits = evaluatePlanTradeLimits({ plan: tradingPlan, trades, candidateRiskPercent: riskPct });
+      const planLimits = evaluatePlanTradeLimits({ plan: tradingPlan, trades: getPerformanceTrades(), candidateRiskPercent: riskPct });
       if (!planLimits.canTrade) {
         alert(planLimits.breaches.map(breach => breach.message).join('\n'));
         return;
@@ -1772,8 +1821,12 @@ function setupModal() {
  * 19. Filters
  */
 function setupFilters() {
-  ['filter-search', 'filter-asset', 'filter-violations'].forEach(id => {
+  ['filter-search', 'filter-asset', 'filter-violations', 'filter-trade-source'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', renderTradeTable);
+    document.getElementById(id)?.addEventListener('change', () => {
+      renderTradeTable();
+      renderGallery();
+    });
   });
 }
 
@@ -1969,14 +2022,15 @@ async function setupPropFirm() {
  */
 function renderPropFirmGuardian() {
   const profile = PROP_FIRM_PRESETS[propFirmConfig.activeProfileId] || PROP_FIRM_PRESETS.TOPSTEP_50K;
-  const buffer = calculateDynamicDrawdownBuffer(trades, profile);
+  const performanceTrades = getPerformanceTrades();
+  const buffer = calculateDynamicDrawdownBuffer(performanceTrades, profile);
   const runway = calculateRunwaySafeRisk(
     buffer.effectiveImmediateCushionDollars,
     propFirmConfig.plannedTradesToday || 2,
     propFirmConfig.safetyMarginPercent || 25
   );
-  const consistency = calculateConsistencyMetrics(trades, profile.consistencyRulePercent);
-  const audit = auditPayoutEligibility(trades, profile);
+  const consistency = calculateConsistencyMetrics(performanceTrades, profile.consistencyRulePercent);
+  const audit = auditPayoutEligibility(performanceTrades, profile);
 
   propFirmData = { profile, buffer, runway, consistency, audit, config: propFirmConfig };
 
@@ -2196,8 +2250,9 @@ function setupPlaybook() {
  * 24. Render Playbook & Counterfactual Equity View
  */
 function renderPlaybookView() {
-  const counter = calculateCounterfactualEquitySplit(trades);
-  const killzones = calculateSessionKillzoneMetrics(trades);
+  const performanceTrades = getPerformanceTrades();
+  const counter = calculateCounterfactualEquitySplit(performanceTrades);
+  const killzones = calculateSessionKillzoneMetrics(performanceTrades);
 
   // 1. Header Metrics
   const elPurity = document.getElementById('pb-purity-score');

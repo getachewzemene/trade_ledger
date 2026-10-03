@@ -107,8 +107,15 @@
             <option value="CLEAN">Clean Trades Only</option>
             <option value="VIOLATIONS">With Violations</option>
           </select>
+          <select id="filter-trade-source" class="form-control" aria-label="Trade data source" style="width: 170px;">
+            <option value="PERSONAL">Personal Trades</option>
+            <option value="DEMO">Demo Practice</option>
+            <option value="SAMPLE">Sample Examples</option>
+          </select>
         </div>
       </div>
+
+      <div id="trade-source-banner" class="trade-source-banner" role="status" aria-live="polite"></div>
 
       <div class="table-container">
         <table class="ledger-table">
@@ -127,6 +134,7 @@
               <th>R-Mult</th>
               <th>Grade</th>
               <th>Discipline Stamp</th>
+              <th>Source</th>
               <th>Setup</th>
               <th>Chart</th>
             </tr>

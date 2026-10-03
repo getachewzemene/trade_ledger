@@ -177,6 +177,54 @@ nav.main-nav {
   display: none;
 }
 
+.trade-source-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.12rem 0.32rem;
+  border: 1px solid var(--ledger-paper-border);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1.35;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.trade-source-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid var(--ledger-gain);
+  background: var(--ledger-paper-subtle);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.trade-source-banner.mode-demo {
+  border-left-color: var(--accent-brass);
+}
+
+.trade-source-banner.mode-sample {
+  border-left-color: #397189;
+}
+
+.source-demo_practice {
+  border-color: var(--accent-brass);
+  color: #765b23;
+}
+
+.source-sample {
+  border-color: #397189;
+  color: #28596c;
+}
+
+.source-csv_import,
+.source-broker_import {
+  border-color: var(--ledger-gain);
+  color: var(--ledger-gain);
+}
+
 @media (max-width: 700px) {
   header.app-header {
     grid-template-columns: minmax(0, 1fr) auto;

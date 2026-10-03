@@ -29,6 +29,7 @@ import {
 } from './src/engine/prop-firm.js';
 import { validateTradePayload, normalizeTradePayload } from './src/engine/validation.js';
 import { buildTradeSummaryReport, buildTradeCsvExport } from './src/engine/reporting.js';
+import { filterPerformanceTrades, tagLegacySampleTrades, tagTradesWithSource, TRADE_SOURCES } from './src/engine/trade-provenance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,15 +63,10 @@ const readJsonFile = (fileName, fallback = []) => {
 
 const persistTrades = () => writeJsonFile('trades.json', activeTrades);
 
-// Load initial sample trades
-let activeTrades = [];
-try {
-  const sampleData = fs.readFileSync(path.join(DATA_DIR, 'sample-trades.json'), 'utf8');
-  const defaultTrades = JSON.parse(sampleData);
-  activeTrades = readJsonFile('trades.json', defaultTrades);
-} catch (err) {
-  console.error('Error loading initial sample trades:', err.message);
-}
+// Keep educational examples separate from the user's persisted journal.
+const sampleTrades = tagTradesWithSource(readJsonFile('sample-trades.json', []), TRADE_SOURCES.SAMPLE);
+let activeTrades = tagLegacySampleTrades(readJsonFile('trades.json', []), sampleTrades);
+const getPerformanceTrades = () => filterPerformanceTrades(activeTrades);
 
 // Load curriculum
 let curriculumData = [];
@@ -157,6 +153,12 @@ const server = http.createServer((req, res) => {
   }
 
   // GET /api/trades
+  if (pathname === '/api/sample-trades' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(analyzeTradeViolations(sampleTrades)));
+    return;
+  }
+
   if (pathname === '/api/trades' && req.method === 'GET') {
     const analyzed = analyzeTradeViolations(activeTrades);
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -179,7 +181,12 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        const safeTrade = { ...trade };
+        const requestedSource = String(trade.source || '').toUpperCase();
+        const safeTrade = {
+          ...trade,
+          source: requestedSource === TRADE_SOURCES.DEMO_PRACTICE ? TRADE_SOURCES.DEMO_PRACTICE : TRADE_SOURCES.MANUAL,
+          executionMode: requestedSource === TRADE_SOURCES.DEMO_PRACTICE ? 'DEMO' : 'JOURNAL'
+        };
 
         // Attach confluence evaluation if setup provided
         if (safeTrade.setupId) {
@@ -209,7 +216,7 @@ const server = http.createServer((req, res) => {
 
         // Evaluate circuit breaker
         const circuit = evaluateCircuitBreaker({
-          trades: activeTrades,
+          trades: getPerformanceTrades(),
           contract: tradingContract,
           candidateTradeDate: safeTrade.entryDate || new Date().toISOString(),
           preSessionLogs
@@ -236,7 +243,7 @@ const server = http.createServer((req, res) => {
 
   // GET /api/analytics
   if (pathname === '/api/analytics' && req.method === 'GET') {
-    const analyzed = analyzeTradeViolations(activeTrades);
+    const analyzed = analyzeTradeViolations(getPerformanceTrades());
     const metrics = calculatePerformanceMetrics(analyzed);
     const diagnostics = calculateLeakDiagnostics(analyzed);
     const excursion = analyzeExcursionPatterns(analyzed);
@@ -248,7 +255,7 @@ const server = http.createServer((req, res) => {
 
   // GET /api/simulation
   if (pathname === '/api/simulation' && req.method === 'GET') {
-    const analyzed = analyzeTradeViolations(activeTrades);
+    const analyzed = analyzeTradeViolations(getPerformanceTrades());
     const metrics = calculatePerformanceMetrics(analyzed);
     const winRate = metrics.winRate > 0 ? metrics.winRate : 50;
     const sim = simulateLosingStreakProbabilities({ winRatePercent: winRate, tradesCount: 100, iterations: 1000 });
@@ -259,7 +266,7 @@ const server = http.createServer((req, res) => {
 
   // GET /api/tilt
   if (pathname === '/api/tilt' && req.method === 'GET') {
-    const analyzed = analyzeTradeViolations(activeTrades);
+    const analyzed = analyzeTradeViolations(getPerformanceTrades());
     const tilt = evaluateTiltState(analyzed, tradingContract.cooldownMinutes);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(tilt));
@@ -302,14 +309,14 @@ const server = http.createServer((req, res) => {
   // GET /api/prop-firm/metrics
   if (pathname === '/api/prop-firm/metrics' && req.method === 'GET') {
     const profile = PROP_FIRM_PRESETS[propFirmConfig.activeProfileId] || PROP_FIRM_PRESETS.TOPSTEP_50K;
-    const buffer = calculateDynamicDrawdownBuffer(activeTrades, profile);
+    const buffer = calculateDynamicDrawdownBuffer(getPerformanceTrades(), profile);
     const runway = calculateRunwaySafeRisk(
       buffer.effectiveImmediateCushionDollars,
       propFirmConfig.plannedTradesToday || 2,
       propFirmConfig.safetyMarginPercent || 25
     );
-    const consistency = calculateConsistencyMetrics(activeTrades, profile.consistencyRulePercent);
-    const audit = auditPayoutEligibility(activeTrades, profile);
+    const consistency = calculateConsistencyMetrics(getPerformanceTrades(), profile.consistencyRulePercent);
+    const audit = auditPayoutEligibility(getPerformanceTrades(), profile);
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -358,7 +365,7 @@ const server = http.createServer((req, res) => {
 
   // GET /api/playbook/counterfactual
   if (pathname === '/api/playbook/counterfactual' && req.method === 'GET') {
-    const analyzed = analyzeTradeViolations(activeTrades);
+    const analyzed = analyzeTradeViolations(getPerformanceTrades());
     const counterfactual = calculateCounterfactualEquitySplit(analyzed);
     const killzones = calculateSessionKillzoneMetrics(analyzed);
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -427,7 +434,7 @@ const server = http.createServer((req, res) => {
 
   // GET /api/reports/summary
   if (pathname === '/api/reports/summary' && req.method === 'GET') {
-    const report = buildTradeSummaryReport(activeTrades);
+    const report = buildTradeSummaryReport(getPerformanceTrades());
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(report));
     return;
@@ -437,7 +444,7 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/reports/export' && req.method === 'GET') {
     const format = parsedUrl.searchParams.get('format') || 'json';
     if (format === 'csv') {
-      const csv = buildTradeCsvExport(activeTrades);
+      const csv = buildTradeCsvExport(getPerformanceTrades());
       res.writeHead(200, {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="ledger_report_${new Date().toISOString().slice(0, 10)}.csv"`
@@ -446,7 +453,7 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    const report = buildTradeSummaryReport(activeTrades);
+    const report = buildTradeSummaryReport(getPerformanceTrades());
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(report));
     return;
@@ -473,7 +480,7 @@ const server = http.createServer((req, res) => {
         }).filter(Boolean);
 
         if (validatedTrades.length > 0) {
-          activeTrades.push(...validatedTrades);
+          activeTrades.push(...validatedTrades.map(trade => ({ ...trade, source: TRADE_SOURCES.CSV_IMPORT, executionMode: 'JOURNAL' })));
           persistTrades();
         }
 

@@ -39,6 +39,7 @@ import { buildTradeSummaryReport, buildTradeCsvExport } from '../src/engine/repo
 import { createSessionState, saveSessionState, loadSessionState, clearSessionState, isSessionActive, getProfileStorageKey, saveProfileData, loadProfileData, clearProfileData } from '../src/engine/session.js';
 import { DEFAULT_PLAN_RULES, DEFAULT_TRADING_PLAN, normalizeTradingPlan, evaluatePlanReadiness, evaluatePlanTradeLimits } from '../src/engine/trading-plan.js';
 import { renderCandlestickPatternChart, renderLessonTopicChart } from '../src/engine/lesson-charts.js';
+import { TRADE_SOURCES, filterPerformanceTrades, isDemoTrade, isSampleTrade, normalizeTradeSource, tagLegacySampleTrades, tagTradesWithSource } from '../src/engine/trade-provenance.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -562,6 +563,24 @@ console.log('\n--- Suite 15: Lesson Charting Examples ---');
     'Rising three methods', 'Falling three methods', 'Kicker'
   ];
   assert(candlePatterns.every(pattern => renderCandlestickPatternChart(pattern).includes('<svg')), 'Every listed candle pattern has an OHLC chart example');
+}
+
+console.log('\n================================================================');
+console.log('\n--- Suite 16: Trade Provenance & Sample Isolation ---');
+{
+  const sample = { id: 'S-1', symbol: 'GC', entryDate: '2026-10-01T10:00:00Z', entryPrice: 2300, quantity: 1, netPnL: 500, source: 'MANUAL' };
+  const taggedSample = tagTradesWithSource([sample], TRADE_SOURCES.SAMPLE)[0];
+  const demo = tagTradesWithSource([{ id: 'D-1', symbol: 'GC' }], TRADE_SOURCES.DEMO_PRACTICE)[0];
+  const personal = { id: 'P-1', symbol: 'GC', source: 'MANUAL', netPnL: -25 };
+  const imported = { id: 'I-1', symbol: 'ES', source: 'CSV_IMPORT', netPnL: 10 };
+
+  assertEquals(taggedSample.source, 'SAMPLE', 'Bundled examples receive explicit sample provenance');
+  assertEquals(isSampleTrade(taggedSample), true, 'Sample records are classified as examples');
+  assertEquals(isDemoTrade(demo), true, 'Demo practice records are classified as simulated');
+  assertEquals(demo.executionMode, 'DEMO', 'Demo source receives a demo execution mode');
+  assertEquals(normalizeTradeSource('unknown-old-value'), 'LEGACY_UNKNOWN', 'Unknown legacy sources remain visibly identifiable');
+  assertEquals(tagLegacySampleTrades([{ ...sample }], [sample])[0].source, 'SAMPLE', 'Legacy persisted copies of bundled examples are recognized');
+  assertEquals(filterPerformanceTrades([taggedSample, demo, personal, imported]).map(trade => trade.id), ['P-1', 'I-1'], 'Performance data excludes sample and demo while retaining personal/imported trades');
 }
 
 console.log('\n================================================================');
