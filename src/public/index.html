@@ -525,6 +525,192 @@
         </div>
       </div>
 
+      <!-- View 6: Execution Quality & Process vs Outcome Studio -->
+      <div class="card" style="border: 2px solid var(--accent-brass); margin-bottom: 1.5rem; background: var(--ledger-paper-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span class="rubber-stamp stamp-neutral" style="font-size: 0.7rem;">PROCESS AUDIT</span>
+              <h3 style="font-family: var(--font-serif); font-size: 1.3rem; margin: 0;">Execution Quality &amp; Process vs. Outcome Studio</h3>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--ink-secondary); margin: 0.25rem 0 0 0;">
+              Tracks whether written entry, stop, target, and exit rules were honored, measuring operational discipline separately from market P&amp;L.
+            </p>
+          </div>
+          <span class="rubber-stamp stamp-clean" id="exec-compliance-badge">PROCESS ADHERENCE: --%</span>
+        </div>
+
+        <!-- Prominent Epistemological Principle Banner (Ensuring no false promise of guaranteed profit) -->
+        <div style="background: #FFF; border: 1px solid var(--ledger-paper-border); border-left: 4px solid var(--accent-brass); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); margin: 0.75rem 0 1rem 0; font-size: 0.8rem; color: var(--ink-secondary); line-height: 1.5;">
+          <strong style="color: var(--ink-primary); font-family: var(--font-serif); display: block; margin-bottom: 0.15rem;">Operational Principle: Process vs. Probabilistic Outcome</strong>
+          Discipline is about control over your operational actions, not market direction. Following your written rules does <strong>not</strong> guarantee that any single trade or series of trades will be profitable. Market results are probabilistic. Rigorous execution ensures you obtain valid statistical feedback on your edge while shielding your account from unforced errors and catastrophic blowout risk.
+        </div>
+
+        <!-- 4-Quadrant Process vs Outcome Matrix -->
+        <h4 style="font-family: var(--font-serif); font-size: 1.05rem; margin-bottom: 0.5rem;">The Process vs. Outcome Matrix</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.25rem;">
+          <!-- Q1: Earned Win -->
+          <div class="card" style="background: #F2F8F4; border: 1.5px solid var(--ledger-profit); padding: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">GOOD PROCESS + WIN</span>
+                <h5 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0.25rem 0 0 0; color: var(--ledger-profit);">Earned Wins</h5>
+              </div>
+              <div style="text-align: right;">
+                <div id="matrix-earned-count" style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: bold; color: var(--ledger-profit);">0 (0%)</div>
+                <div id="matrix-earned-pnl" style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted);">+$0.00</div>
+              </div>
+            </div>
+            <p style="font-size: 0.76rem; color: var(--ink-secondary); margin: 0.5rem 0 0 0;">
+              Disciplined execution rewarded by market alignment. Process and outcome reinforced in harmony.
+            </p>
+          </div>
+
+          <!-- Q2: Compliant Loss -->
+          <div class="card" style="background: #F0F5FA; border: 1.5px solid #2B6CB0; padding: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">GOOD PROCESS + LOSS</span>
+                <h5 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0.25rem 0 0 0; color: #2B6CB0);">Compliant Losses</h5>
+              </div>
+              <div style="text-align: right;">
+                <div id="matrix-comploss-count" style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: bold; color: #2B6CB0;">0 (0%)</div>
+                <div id="matrix-comploss-pnl" style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted);">-$0.00</div>
+              </div>
+            </div>
+            <p style="font-size: 0.76rem; color: var(--ink-secondary); margin: 0.5rem 0 0 0;">
+              Rules followed strictly. A planned stop-out is a routine business cost of probabilistic trading, not an error.
+            </p>
+          </div>
+
+          <!-- Q3: Lucky Win -->
+          <div class="card" style="background: #FFF9ED; border: 1.5px solid #B57614; padding: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="rubber-stamp stamp-warning" style="font-size: 0.65rem;">BAD PROCESS + WIN</span>
+                <h5 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0.25rem 0 0 0; color: #B57614;">Lucky Wins (Hazardous)</h5>
+              </div>
+              <div style="text-align: right;">
+                <div id="matrix-lucky-count" style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: bold; color: #B57614;">0 (0%)</div>
+                <div id="matrix-lucky-pnl" style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted);">+$0.00</div>
+              </div>
+            </div>
+            <p style="font-size: 0.76rem; color: var(--ink-secondary); margin: 0.5rem 0 0 0;">
+              Rules were broken but market noise bailed you out. Dangerous event: falsely reinforces destructive habits.
+            </p>
+          </div>
+
+          <!-- Q4: Unforced Error -->
+          <div class="card" style="background: #FAECEB; border: 1.5px solid var(--ledger-loss); padding: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="rubber-stamp stamp-danger" style="font-size: 0.65rem;">BAD PROCESS + LOSS</span>
+                <h5 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0.25rem 0 0 0; color: var(--ledger-loss);">Unforced Errors</h5>
+              </div>
+              <div style="text-align: right;">
+                <div id="matrix-unforced-count" style="font-family: var(--font-mono); font-size: 1.25rem; font-weight: bold; color: var(--ledger-loss);">0 (0%)</div>
+                <div id="matrix-unforced-pnl" style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-muted);">-$0.00</div>
+              </div>
+            </div>
+            <p style="font-size: 0.76rem; color: var(--ink-secondary); margin: 0.5rem 0 0 0;">
+              Rules violated and capital was lost. Self-inflicted damage resulting from undisciplined execution.
+            </p>
+          </div>
+        </div>
+
+        <!-- Cohort Comparison Table: Compliant vs Non-Compliant -->
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; align-items: start;">
+          <div>
+            <h4 style="font-family: var(--font-serif); font-size: 1.05rem; margin-bottom: 0.5rem;">Compliant vs. Non-Compliant Cohort Comparison</h4>
+            <table class="ledger-table" style="font-size: 0.82rem;">
+              <thead>
+                <tr>
+                  <th>Performance Metric</th>
+                  <th>Compliant Trades (All Rules Met)</th>
+                  <th>Non-Compliant Trades (Breached Rules)</th>
+                </tr>
+              </thead>
+              <tbody id="cohort-comparison-tbody">
+                <tr>
+                  <td>Trade Count</td>
+                  <td id="cohort-comp-count">--</td>
+                  <td id="cohort-noncomp-count">--</td>
+                </tr>
+                <tr>
+                  <td>Win Rate (%)</td>
+                  <td id="cohort-comp-winrate">--%</td>
+                  <td id="cohort-noncomp-winrate">--%</td>
+                </tr>
+                <tr>
+                  <td>Average Expectancy (R)</td>
+                  <td id="cohort-comp-avgr">-- R</td>
+                  <td id="cohort-noncomp-avgr">-- R</td>
+                </tr>
+                <tr>
+                  <td>Profit Factor</td>
+                  <td id="cohort-comp-pf">--</td>
+                  <td id="cohort-noncomp-pf">--</td>
+                </tr>
+                <tr>
+                  <td>Total Net P&amp;L</td>
+                  <td id="cohort-comp-netpnl">--</td>
+                  <td id="cohort-noncomp-netpnl">--</td>
+                </tr>
+                <tr>
+                  <td>Worst Single Loss (Tail Risk)</td>
+                  <td id="cohort-comp-worstloss" style="color: var(--ledger-loss);">-- R</td>
+                  <td id="cohort-noncomp-worstloss" style="color: var(--ledger-loss); font-weight: bold;">-- R</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Phase-by-Phase Rule Adherence Rates -->
+          <div>
+            <h4 style="font-family: var(--font-serif); font-size: 1.05rem; margin-bottom: 0.5rem;">Phase Adherence Rates</h4>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem; background: var(--ledger-paper-base); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border); font-size: 0.8rem;">
+              <div>
+                <div style="display: flex; justify-content: space-between; font-family: var(--font-mono); margin-bottom: 0.2rem;">
+                  <span>1. Entry Rules:</span>
+                  <strong id="phase-rate-entry">--%</strong>
+                </div>
+                <div class="lab-meter-container"><div id="phase-bar-entry" class="lab-meter-fill" style="width: 0%; background: var(--ledger-profit);"></div></div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; font-family: var(--font-mono); margin-bottom: 0.2rem;">
+                  <span>2. Stop Loss Rules:</span>
+                  <strong id="phase-rate-stop">--%</strong>
+                </div>
+                <div class="lab-meter-container"><div id="phase-bar-stop" class="lab-meter-fill" style="width: 0%; background: var(--ledger-profit);"></div></div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; font-family: var(--font-mono); margin-bottom: 0.2rem;">
+                  <span>3. Target Rules:</span>
+                  <strong id="phase-rate-target">--%</strong>
+                </div>
+                <div class="lab-meter-container"><div id="phase-bar-target" class="lab-meter-fill" style="width: 0%; background: var(--ledger-profit);"></div></div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; font-family: var(--font-mono); margin-bottom: 0.2rem;">
+                  <span>4. Exit Rules:</span>
+                  <strong id="phase-rate-exit">--%</strong>
+                </div>
+                <div class="lab-meter-container"><div id="phase-bar-exit" class="lab-meter-fill" style="width: 0%; background: var(--ledger-profit);"></div></div>
+              </div>
+            </div>
+
+            <!-- Tail Risk Shield Callout -->
+            <div id="cohort-tailrisk-callout" style="margin-top: 0.65rem; padding: 0.5rem; background: #FFF; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border); font-size: 0.76rem; color: var(--ink-secondary);">
+              Loading tail risk protection comparison...
+            </div>
+          </div>
+        </div>
+
+        <div id="exec-insights-list" style="margin-top: 1rem; padding: 0.75rem; background: #FFF; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border); font-size: 0.82rem; line-height: 1.5; color: var(--ink-primary);">
+          <!-- Populated via JS -->
+        </div>
+      </div>
+
       <div class="canvas-wrapper">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
           <h3 style="font-family: var(--font-serif); font-size: 1.2rem;">Cumulative Equity & Drawdown Curve</h3>
@@ -1718,6 +1904,55 @@
                 <option value="ANGER_REVENGE">Anger / Strong Urge to Win Money Back</option>
               </select>
             </div>
+          </div>
+        </div>
+
+        <!-- Written Rules Execution Adherence (4 Checkpoints) -->
+        <div class="card" style="background: var(--ledger-paper-subtle); border: 1.5px solid var(--accent-brass); margin: 1.25rem 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <span class="rubber-stamp stamp-neutral" style="font-size: 0.7rem;">EXECUTION QUALITY</span>
+              <strong style="margin-left: 0.5rem; font-family: var(--font-serif); font-size: 1.1rem;">Written Rules Fidelity Audit</strong>
+            </div>
+            <div id="modal-exec-quality-badge" class="rubber-stamp stamp-clean">PERFECT EXECUTION (4/4)</div>
+          </div>
+          <p style="font-size: 0.78rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Did you follow your written operational rules for this trade? Execution quality tracks process discipline independently from whether the trade won or lost.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; font-size: 0.82rem;">
+            <label style="display: flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; background: var(--ledger-paper-base); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+              <input type="checkbox" id="rule-check-entry" checked style="margin-top: 0.2rem;">
+              <div>
+                <strong>Entry Rule Followed:</strong>
+                <div style="font-size: 0.72rem; color: var(--ink-muted);">Waited for confirmed playbook trigger, no FOMO/chasing.</div>
+              </div>
+            </label>
+            <label style="display: flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; background: var(--ledger-paper-base); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+              <input type="checkbox" id="rule-check-stop" checked style="margin-top: 0.2rem;">
+              <div>
+                <strong>Stop Loss Rule Followed:</strong>
+                <div style="font-size: 0.72rem; color: var(--ink-muted);">Predefined invalidation stop set; never widened or cancelled.</div>
+              </div>
+            </label>
+            <label style="display: flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; background: var(--ledger-paper-base); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+              <input type="checkbox" id="rule-check-target" checked style="margin-top: 0.2rem;">
+              <div>
+                <strong>Profit Target Rule Followed:</strong>
+                <div style="font-size: 0.72rem; color: var(--ink-muted);">Target set at structural objective with minimum required R:R.</div>
+              </div>
+            </label>
+            <label style="display: flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; background: var(--ledger-paper-base); padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+              <input type="checkbox" id="rule-check-exit" checked style="margin-top: 0.2rem;">
+              <div>
+                <strong>Exit Rule Followed:</strong>
+                <div style="font-size: 0.72rem; color: var(--ink-muted);">Exited strictly per plan; no fear cut or greed over-holding.</div>
+              </div>
+            </label>
+          </div>
+          
+          <div style="font-size: 0.72rem; color: var(--ink-muted); margin-top: 0.5rem; font-style: italic;">
+            Note: Following written rules does not guarantee profit. It guarantees clean statistical data and prevents unforced errors.
           </div>
         </div>
 

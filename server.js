@@ -41,6 +41,7 @@ import {
   calculateUncertaintyMetrics,
   calculateRegimeBreakdown
 } from './src/engine/research-lab.js';
+import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome } from './src/engine/execution-quality.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -249,6 +250,9 @@ const server = http.createServer((req, res) => {
           safeTrade.violations = safeTrade.violations || [];
           safeTrade.violations.push('CONTRACT_BREACH');
         }
+        
+        safeTrade.executionQuality = evaluateExecutionQuality(safeTrade);
+        safeTrade.processOutcome = classifyProcessOutcome(safeTrade);
 
         safeTrade.id = safeTrade.id || `TR-${1000 + activeTrades.length + 1}`;
         activeTrades.push(safeTrade);
@@ -271,8 +275,18 @@ const server = http.createServer((req, res) => {
     const diagnostics = calculateLeakDiagnostics(analyzed);
     const excursion = analyzeExcursionPatterns(analyzed);
     const tilt = evaluateTiltState(analyzed, tradingContract.cooldownMinutes);
+    const executionQuality = compareExecutionCohorts(analyzed);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ metrics, diagnostics, excursion, tilt }));
+    res.end(JSON.stringify({ metrics, diagnostics, excursion, tilt, executionQuality }));
+    return;
+  }
+
+  // GET /api/execution-quality
+  if (pathname === '/api/execution-quality' && req.method === 'GET') {
+    const analyzed = analyzeTradeViolations(getPerformanceTrades());
+    const quality = compareExecutionCohorts(analyzed);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(quality));
     return;
   }
 

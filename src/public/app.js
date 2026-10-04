@@ -10,6 +10,7 @@
 
 import { calculatePerformanceMetrics, groupTradesBy } from '../engine/metrics.js';
 import { calculatePositionSize, calculateInstrumentAwarePositionSize, evaluateInstrumentRiskGuardrails, getInstrumentSpec } from '../engine/sizing.js';
+import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome, EXECUTION_DISCLAIMER } from '../engine/execution-quality.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics, LEAK_DEFINITIONS } from '../engine/leak-detector.js';
 import { buildTradeSummaryReport } from '../engine/reporting.js';
 import { importTradesFromCSV } from '../engine/csv-parser.js';
@@ -471,6 +472,7 @@ function refreshAllViews() {
   renderLeakDiagnostics();
   renderDashboardSummary();
   renderPerformanceMetrics();
+  renderExecutionQualityStudio();
   drawEquityCurve();
   renderExcursionDiagnostics();
   renderMonteCarloSimulation();
@@ -745,6 +747,100 @@ function renderPerformanceMetrics() {
     `).join('');
   }
 }
+
+/**
+ * 4.5. Render Execution Quality & Process vs Outcome Studio
+ */
+function renderExecutionQualityStudio() {
+  const performanceTrades = getPerformanceTrades();
+  const cohorts = compareExecutionCohorts(performanceTrades);
+
+  const complianceBadge = document.getElementById('exec-compliance-badge');
+  if (complianceBadge) {
+    complianceBadge.textContent = `PROCESS ADHERENCE: ${cohorts.complianceRate}%`;
+    complianceBadge.className = cohorts.complianceRate >= 80 ? 'rubber-stamp stamp-clean' : (cohorts.complianceRate >= 60 ? 'rubber-stamp stamp-neutral' : 'rubber-stamp stamp-danger');
+  }
+
+  // 4 Quadrants
+  const setHtml = (id, html) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  };
+
+  setHtml('matrix-earned-count', `${cohorts.quadrants.earnedWins.count} <span style="font-size: 0.85rem; font-weight: normal;">(${cohorts.quadrants.earnedWins.percent}%)</span>`);
+  setHtml('matrix-earned-pnl', `+$${cohorts.quadrants.earnedWins.totalPnL.toFixed(2)} (${cohorts.quadrants.earnedWins.totalR >= 0 ? '+' : ''}${cohorts.quadrants.earnedWins.totalR.toFixed(2)}R)`);
+
+  setHtml('matrix-comploss-count', `${cohorts.quadrants.compliantLosses.count} <span style="font-size: 0.85rem; font-weight: normal;">(${cohorts.quadrants.compliantLosses.percent}%)</span>`);
+  setHtml('matrix-comploss-pnl', `-$${Math.abs(cohorts.quadrants.compliantLosses.totalPnL).toFixed(2)} (${cohorts.quadrants.compliantLosses.totalR.toFixed(2)}R)`);
+
+  setHtml('matrix-lucky-count', `${cohorts.quadrants.luckyWins.count} <span style="font-size: 0.85rem; font-weight: normal;">(${cohorts.quadrants.luckyWins.percent}%)</span>`);
+  setHtml('matrix-lucky-pnl', `+$${cohorts.quadrants.luckyWins.totalPnL.toFixed(2)} (${cohorts.quadrants.luckyWins.totalR >= 0 ? '+' : ''}${cohorts.quadrants.luckyWins.totalR.toFixed(2)}R)`);
+
+  setHtml('matrix-unforced-count', `${cohorts.quadrants.unforcedErrors.count} <span style="font-size: 0.85rem; font-weight: normal;">(${cohorts.quadrants.unforcedErrors.percent}%)</span>`);
+  setHtml('matrix-unforced-pnl', `-$${Math.abs(cohorts.quadrants.unforcedErrors.totalPnL).toFixed(2)} (${cohorts.quadrants.unforcedErrors.totalR.toFixed(2)}R)`);
+
+  // Cohort comparison table
+  const comp = cohorts.compliantCohort;
+  const nonComp = cohorts.nonCompliantCohort;
+
+  setHtml('cohort-comp-count', `<strong>${comp.count}</strong> (${comp.percentOfTotal}%)`);
+  setHtml('cohort-noncomp-count', `<strong>${nonComp.count}</strong> (${nonComp.percentOfTotal}%)`);
+
+  setHtml('cohort-comp-winrate', `<strong>${comp.winRate}%</strong> (${comp.wins}W / ${comp.losses}L)`);
+  setHtml('cohort-noncomp-winrate', `<strong>${nonComp.winRate}%</strong> (${nonComp.wins}W / ${nonComp.losses}L)`);
+
+  setHtml('cohort-comp-avgr', `<strong>${comp.avgR >= 0 ? '+' : ''}${comp.avgR.toFixed(2)}R</strong>`);
+  setHtml('cohort-noncomp-avgr', `<strong>${nonComp.avgR >= 0 ? '+' : ''}${nonComp.avgR.toFixed(2)}R</strong>`);
+
+  setHtml('cohort-comp-pf', `<strong>${comp.profitFactor.toFixed(2)}</strong>`);
+  setHtml('cohort-noncomp-pf', `<strong>${nonComp.profitFactor.toFixed(2)}</strong>`);
+
+  setHtml('cohort-comp-netpnl', `<span class="${comp.netPnL >= 0 ? 'gain' : 'loss'}"><strong>${comp.netPnL >= 0 ? '+$' : '-$'}${Math.abs(comp.netPnL).toFixed(2)}</strong> (${comp.totalR >= 0 ? '+' : ''}${comp.totalR.toFixed(2)}R)</span>`);
+  setHtml('cohort-noncomp-netpnl', `<span class="${nonComp.netPnL >= 0 ? 'gain' : 'loss'}"><strong>${nonComp.netPnL >= 0 ? '+$' : '-$'}${Math.abs(nonComp.netPnL).toFixed(2)}</strong> (${nonComp.totalR >= 0 ? '+' : ''}${nonComp.totalR.toFixed(2)}R)</span>`);
+
+  setHtml('cohort-comp-worstloss', `-${comp.worstLossR.toFixed(2)}R`);
+  setHtml('cohort-noncomp-worstloss', `-${nonComp.worstLossR.toFixed(2)}R`);
+
+  // Phase adherence rates
+  const rb = cohorts.ruleBreakdown;
+  setHtml('phase-rate-entry', `${rb.entryComplianceRate}%`);
+  const barEntry = document.getElementById('phase-bar-entry');
+  if (barEntry) barEntry.style.width = `${rb.entryComplianceRate}%`;
+
+  setHtml('phase-rate-stop', `${rb.stopComplianceRate}%`);
+  const barStop = document.getElementById('phase-bar-stop');
+  if (barStop) barStop.style.width = `${rb.stopComplianceRate}%`;
+
+  setHtml('phase-rate-target', `${rb.targetComplianceRate}%`);
+  const barTarget = document.getElementById('phase-bar-target');
+  if (barTarget) barTarget.style.width = `${rb.targetComplianceRate}%`;
+
+  setHtml('phase-rate-exit', `${rb.exitComplianceRate}%`);
+  const barExit = document.getElementById('phase-bar-exit');
+  if (barExit) barExit.style.width = `${rb.exitComplianceRate}%`;
+
+  // Tail risk callout
+  const tailCallout = document.getElementById('cohort-tailrisk-callout');
+  if (tailCallout) {
+    if (nonComp.worstLossR > comp.worstLossR) {
+      tailCallout.innerHTML = `🛡️ <strong>Tail Risk Shield:</strong> Worst compliant loss was strictly capped at <strong>-${comp.worstLossR.toFixed(1)}R</strong>, while non-compliant trades suffered an unmanaged <strong>-${nonComp.worstLossR.toFixed(1)}R</strong> outlier loss.`;
+    } else {
+      tailCallout.innerHTML = `🛡️ <strong>Tail Risk Shield:</strong> Compliant stop rules keep loss distribution tight, eliminating unmanaged blowout risk.`;
+    }
+  }
+
+  // Insights list
+  const insightsList = document.getElementById('exec-insights-list');
+  if (insightsList) {
+    insightsList.innerHTML = `
+      <div style="font-weight: bold; margin-bottom: 0.35rem; color: var(--ink-secondary); font-size: 0.78rem; text-transform: uppercase; font-family: var(--font-mono);">Behavioral & Process Insights:</div>
+      <ul style="margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.3rem;">
+        ${cohorts.insights.map(i => `<li>${i}</li>`).join('')}
+      </ul>
+    `;
+  }
+}
+
 
 /**
  * 5. Render MAE & MFE Excursion Diagnostics
@@ -1783,6 +1879,34 @@ function setupModal() {
   if (closeBtn) closeBtn.addEventListener('click', closeModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
 
+  const updateRuleFidelityBadge = () => {
+    const entry = document.getElementById('rule-check-entry')?.checked ?? true;
+    const stop = document.getElementById('rule-check-stop')?.checked ?? true;
+    const target = document.getElementById('rule-check-target')?.checked ?? true;
+    const exit = document.getElementById('rule-check-exit')?.checked ?? true;
+    const passed = (entry ? 1 : 0) + (stop ? 1 : 0) + (target ? 1 : 0) + (exit ? 1 : 0);
+    const badge = document.getElementById('modal-exec-quality-badge');
+    if (badge) {
+      if (passed === 4) {
+        badge.className = 'rubber-stamp stamp-clean';
+        badge.textContent = 'PERFECT EXECUTION (4/4)';
+      } else if (passed === 3) {
+        badge.className = 'rubber-stamp stamp-neutral';
+        badge.textContent = 'GOOD PROCESS (3/4)';
+      } else if (passed === 2) {
+        badge.className = 'rubber-stamp stamp-warning';
+        badge.textContent = 'PROCESS SLIPPAGE (2/4)';
+      } else {
+        badge.className = 'rubber-stamp stamp-danger';
+        badge.textContent = `RULE BREAKDOWN (${passed}/4)`;
+      }
+    }
+  };
+
+  ['rule-check-entry', 'rule-check-stop', 'rule-check-target', 'rule-check-exit'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateRuleFidelityBadge);
+  });
+
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1866,10 +1990,24 @@ function setupModal() {
       const checkedBoxes = Array.from(document.querySelectorAll('#modal-confluence-items input[type="checkbox"]:checked')).map(cb => cb.value);
       const confluenceResult = evaluateTradeConfluence(setupId, checkedBoxes);
 
+      // Extract Written Rules Adherence (4 checkpoints)
+      const rulesFollowed = {
+        entry: document.getElementById('rule-check-entry')?.checked ?? true,
+        stop: document.getElementById('rule-check-stop')?.checked ?? true,
+        target: document.getElementById('rule-check-target')?.checked ?? true,
+        exit: document.getElementById('rule-check-exit')?.checked ?? true
+      };
+      const executionQuality = evaluateExecutionQuality({ rulesFollowed, debrief: debriefData, setupId });
+      const processOutcome = classifyProcessOutcome({ rulesFollowed, debrief: debriefData, setupId, netPnL, rMultiple: Math.round((netPnL / plannedRiskDollars) * 100) / 100 });
+
       const newTrade = {
         id: `TR-${1000 + trades.length + 1}`,
         confluence: confluenceResult,
         isPlaybookCompliant: confluenceResult.isPlaybookCompliant,
+        rulesFollowed,
+        executionQuality,
+        processOutcome,
+        isFullyCompliant: executionQuality.isFullyCompliant,
         symbol,
         assetClass,
         direction,

@@ -18,6 +18,7 @@ import { normalizeNumber, normalizeDirection, importTradesFromCSV } from '../src
 import { analyzeTradeViolations, calculateLeakDiagnostics } from '../src/engine/leak-detector.js';
 import { calculateExcursionR, analyzeExcursionPatterns } from '../src/engine/excursion.js';
 import { evaluateCircuitBreaker, DEFAULT_TRADING_CONTRACT } from '../src/engine/contract.js';
+import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome, EXECUTION_RULES, PROCESS_OUTCOME_QUADRANTS, EXECUTION_DISCLAIMER } from '../src/engine/execution-quality.js';
 import { gradeTradeDebrief, evaluateTiltState } from '../src/engine/debrief-tilt.js';
 import { simulateLosingStreakProbabilities } from '../src/engine/simulation.js';
 import { 
@@ -929,6 +930,135 @@ console.log('\n--- Suite 18: Instrument-Aware Sizing & Hard Risk Guardrails ---'
   // 9. Clear Explanation when the App says "BLOCK"
   assert(lossCapGuard.explanation.includes('HARD GUARDRAIL BLOCKED ⚠'), 'Blocked explanation includes alert headline');
   assert(lossCapGuard.explanation.includes('Remediation:'), 'Blocked explanation provides actionable remediation');
+}
+
+// 19. EXECUTION QUALITY & PROCESS VS OUTCOME COHORTS
+console.log('\n--- Suite 19: Execution Quality & Process vs Outcome Cohorts ---');
+{
+  // 1. Four Written Rule Checkpoints Evaluation
+  const fullyCompliantTrade = {
+    symbol: 'ES',
+    direction: 'LONG',
+    rulesFollowed: { entry: true, stop: true, target: true, exit: true },
+    netPnL: 500,
+    rMultiple: 2.0
+  };
+  const execFull = evaluateExecutionQuality(fullyCompliantTrade);
+  assertEquals(execFull.passedCount, 4, 'All 4 written rules followed');
+  assertEquals(execFull.score, 100, 'Execution quality score = 100%');
+  assertEquals(execFull.isFullyCompliant, true, 'Trade marked fully compliant');
+  assertEquals(execFull.grade, 'A', 'Execution grade is A');
+  assertEquals(execFull.breachedRules.length, 0, 'Zero breached rules');
+
+  // 2. Partial Rule Compliance & Specific Breaches
+  const stopBreachedTrade = {
+    symbol: 'NQ',
+    direction: 'SHORT',
+    rulesFollowed: { entry: true, stop: false, target: true, exit: true },
+    netPnL: -1500,
+    rMultiple: -3.0
+  };
+  const execStopBreach = evaluateExecutionQuality(stopBreachedTrade);
+  assertEquals(execStopBreach.passedCount, 3, '3/4 written rules followed');
+  assertEquals(execStopBreach.score, 75, 'Execution quality score = 75%');
+  assertEquals(execStopBreach.isFullyCompliant, false, 'Trade marked non-compliant');
+  assert(execStopBreach.breachedRules.includes('stop'), 'Stop rule recorded as breached');
+
+  // 3. Inference from Debrief and Violations when Rules Not Explicit
+  const inferredTrade = {
+    symbol: 'EURUSD',
+    direction: 'LONG',
+    debrief: {
+      executionIntegrity: 'CHASED_EARLY',
+      tradeManagement: 'CLOSED_PREMATURELY'
+    },
+    violations: ['CHASED_ENTRY', 'EARLY_EXIT'],
+    stopLoss: 1.0800,
+    takeProfit: 1.0900
+  };
+  const execInferred = evaluateExecutionQuality(inferredTrade);
+  assertEquals(execInferred.rules.entry, false, 'Entry rule inferred as false from CHASED_ENTRY');
+  assertEquals(execInferred.rules.exit, false, 'Exit rule inferred as false from EARLY_EXIT');
+  assertEquals(execInferred.rules.stop, true, 'Stop rule inferred as true (stop defined & not widened)');
+  assertEquals(execInferred.rules.target, true, 'Target rule inferred as true (target defined)');
+  assertEquals(execInferred.passedCount, 2, '2/4 rules followed on inferred trade');
+
+  // 4. Process vs Outcome Matrix (4 Quadrants)
+  // Q1: Earned Win (Good Process + Win)
+  const earnedWinTrade = {
+    rulesFollowed: { entry: true, stop: true, target: true, exit: true },
+    netPnL: 600,
+    rMultiple: 2.0
+  };
+  const q1 = classifyProcessOutcome(earnedWinTrade);
+  assertEquals(q1.quadrant, PROCESS_OUTCOME_QUADRANTS.EARNED_WIN, 'Q1: Earned Win classified correctly');
+  assert(q1.isCompliant === true && q1.isWin === true, 'Earned win has compliant process and win outcome');
+
+  // Q2: Compliant Loss (Good Process + Loss -> Valid probabilistic business expense)
+  const compliantLossTrade = {
+    rulesFollowed: { entry: true, stop: true, target: true, exit: true },
+    netPnL: -300,
+    rMultiple: -1.0
+  };
+  const q2 = classifyProcessOutcome(compliantLossTrade);
+  assertEquals(q2.quadrant, PROCESS_OUTCOME_QUADRANTS.COMPLIANT_LOSS, 'Q2: Compliant Loss classified correctly');
+  assert(q2.isCompliant === true && q2.isWin === false, 'Compliant loss has compliant process and loss outcome');
+  assert(q2.insight.includes('routine business expenses, not operational mistakes'), 'Explains compliant loss as routine business cost, not an error');
+
+  // Q3: Lucky Win (Bad Process + Win -> Hazardous toxic habit)
+  const luckyWinTrade = {
+    rulesFollowed: { entry: false, stop: false, target: false, exit: false },
+    netPnL: 800,
+    rMultiple: 2.5
+  };
+  const q3 = classifyProcessOutcome(luckyWinTrade);
+  assertEquals(q3.quadrant, PROCESS_OUTCOME_QUADRANTS.LUCKY_WIN, 'Q3: Lucky Win classified correctly');
+  assert(q3.isCompliant === false && q3.isWin === true, 'Lucky win has non-compliant process and win outcome');
+  assert(q3.insight.includes('falsely reinforces undisciplined habits'), 'Warns against toxic habit reinforcement from lucky win');
+
+  // Q4: Unforced Error (Bad Process + Loss -> Self-inflicted wound)
+  const unforcedErrorTrade = {
+    rulesFollowed: { entry: false, stop: false, target: true, exit: false },
+    netPnL: -1200,
+    rMultiple: -4.0
+  };
+  const q4 = classifyProcessOutcome(unforcedErrorTrade);
+  assertEquals(q4.quadrant, PROCESS_OUTCOME_QUADRANTS.UNFORCED_ERROR, 'Q4: Unforced Error classified correctly');
+  assert(q4.isCompliant === false && q4.isWin === false, 'Unforced error has non-compliant process and loss outcome');
+
+  // 5. Cohort Comparison Over Time
+  const testCohortTrades = [
+    // 3 Compliant trades: 2 wins, 1 loss (Capped at -1.0R)
+    { id: 'T-1', rulesFollowed: { entry: true, stop: true, target: true, exit: true }, netPnL: 400, rMultiple: 2.0 },
+    { id: 'T-2', rulesFollowed: { entry: true, stop: true, target: true, exit: true }, netPnL: 300, rMultiple: 1.5 },
+    { id: 'T-3', rulesFollowed: { entry: true, stop: true, target: true, exit: true }, netPnL: -200, rMultiple: -1.0 },
+    // 2 Non-compliant trades: 1 lucky win (+1.0R), 1 blowout loss (-3.5R due to moving stop)
+    { id: 'T-4', rulesFollowed: { entry: false, stop: true, target: true, exit: true }, netPnL: 200, rMultiple: 1.0 },
+    { id: 'T-5', rulesFollowed: { entry: true, stop: false, target: true, exit: false }, netPnL: -700, rMultiple: -3.5 }
+  ];
+
+  const cohortComparison = compareExecutionCohorts(testCohortTrades);
+  assertEquals(cohortComparison.totalTrades, 5, 'Total trades = 5');
+  assertEquals(cohortComparison.complianceRate, 60, 'Compliance rate = 3/5 = 60%');
+  assertEquals(cohortComparison.compliantCohort.count, 3, 'Compliant cohort count = 3');
+  assertEquals(cohortComparison.nonCompliantCohort.count, 2, 'Non-compliant cohort count = 2');
+  assertEquals(cohortComparison.compliantCohort.winRate, 67, 'Compliant cohort win rate = 67% (2/3)');
+  assertEquals(cohortComparison.nonCompliantCohort.winRate, 50, 'Non-compliant cohort win rate = 50% (1/2)');
+  assertEquals(cohortComparison.compliantCohort.worstLossR, 1.0, 'Compliant worst loss is capped at -1.0R');
+  assertEquals(cohortComparison.nonCompliantCohort.worstLossR, 3.5, 'Non-compliant worst loss blew out to -3.5R');
+  assert(cohortComparison.tailRiskRatio >= 3.0, 'Tail risk ratio reflects unmanaged loss in non-compliant trades');
+
+  // 6. Phase Adherence Rates Breakdown
+  assertEquals(cohortComparison.ruleBreakdown.entryComplianceRate, 80, 'Entry rule compliance = 4/5 = 80%');
+  assertEquals(cohortComparison.ruleBreakdown.stopComplianceRate, 80, 'Stop rule compliance = 4/5 = 80%');
+  assertEquals(cohortComparison.ruleBreakdown.targetComplianceRate, 100, 'Target rule compliance = 5/5 = 100%');
+  assertEquals(cohortComparison.ruleBreakdown.exitComplianceRate, 80, 'Exit rule compliance = 4/5 = 80%');
+
+  // 7. Non-Guarantee of Profits Disclaimer
+  assert(typeof cohortComparison.disclaimer === 'string', 'Disclaimer is present');
+  assert(cohortComparison.disclaimer.includes('Following written entry, stop, target, and exit rules does NOT guarantee'), 'Disclaimer states following rules does NOT guarantee profit');
+  assert(cohortComparison.disclaimer.includes('Market results are probabilistic'), 'Disclaimer explains probabilistic nature of market results');
+  assert(cohortComparison.disclaimer.includes('Discipline is about control over operational actions, not market outcomes'), 'Disclaimer emphasizes control over actions vs outcomes');
 }
 
 console.log('\n================================================================');

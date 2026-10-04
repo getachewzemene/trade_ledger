@@ -62,6 +62,15 @@ export function normalizeTradePayload(trade = {}) {
     normalized.rMultiple = Number(((Number(normalized.netPnL) || 0) / (Number(normalized.plannedRiskDollars) || 1)).toFixed(2));
   }
 
+  if (normalized.rulesFollowed && typeof normalized.rulesFollowed === 'object') {
+    normalized.rulesFollowed = {
+      entry: Boolean(normalized.rulesFollowed.entry),
+      stop: Boolean(normalized.rulesFollowed.stop),
+      target: Boolean(normalized.rulesFollowed.target),
+      exit: Boolean(normalized.rulesFollowed.exit)
+    };
+  }
+
   if (normalized.source === undefined) {
     normalized.source = 'MANUAL';
   }
