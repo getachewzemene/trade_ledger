@@ -1602,10 +1602,51 @@
         </div>
 
         <!-- Position Sizing Preview -->
-        <div class="calculator-preview" id="calc-preview">
-          <div><strong>Position Sizing Calculation:</strong></div>
-          <div id="calc-details" style="margin-top: 0.35rem; color: var(--ink-secondary);">
+        <div class="calculator-preview card" id="calc-preview" style="background: var(--ledger-paper-base); border: 1.5px solid var(--accent-brass); padding: 1rem; margin-top: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span class="rubber-stamp stamp-neutral" id="calc-instrument-badge" style="font-size: 0.65rem;">INSTRUMENT SIZING</span>
+              <strong style="font-family: var(--font-serif); font-size: 1.05rem;">Instrument-Aware Sizing &amp; Risk Guardrails</strong>
+            </div>
+            <label style="font-size: 0.75rem; font-family: var(--font-mono); display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+              <input type="checkbox" id="calc-account-for-costs" checked>
+              <span>Deduct Friction (Comm/Spread/Slip)</span>
+            </label>
+          </div>
+          <div id="calc-details" style="font-size: 0.85rem; color: var(--ink-secondary); line-height: 1.5;">
             Enter Entry and Stop Loss prices to compute position size.
+          </div>
+
+          <!-- Friction and Guardrail Breakdown HUD -->
+          <div id="calc-friction-hud" style="display: none; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--ledger-paper-border);">
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; text-align: center; margin-bottom: 0.75rem; font-size: 0.8rem;">
+              <div style="background: var(--ledger-paper-subtle); padding: 0.4rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+                <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted);">NOMINAL RISK</div>
+                <div id="calc-stat-nominal" style="font-family: var(--font-mono); font-weight: bold; margin-top: 0.15rem;">$0.00</div>
+              </div>
+              <div style="background: var(--ledger-paper-subtle); padding: 0.4rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+                <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted);">EST. FRICTION</div>
+                <div id="calc-stat-friction" style="font-family: var(--font-mono); font-weight: bold; color: var(--ledger-loss); margin-top: 0.15rem;">$0.00</div>
+              </div>
+              <div style="background: var(--ledger-paper-subtle); padding: 0.4rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+                <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted);">COMMITTED RISK</div>
+                <div id="calc-stat-committed" style="font-family: var(--font-mono); font-weight: bold; margin-top: 0.15rem;">$0.00</div>
+              </div>
+              <div style="background: var(--ledger-paper-subtle); padding: 0.4rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+                <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--ink-muted);">REMAINING BUFFER</div>
+                <div id="calc-stat-buffer" style="font-family: var(--font-mono); font-weight: bold; color: var(--ledger-profit); margin-top: 0.15rem;">--</div>
+              </div>
+            </div>
+
+            <!-- Hard Guardrails Status Banner -->
+            <div id="modal-guardrail-verdict-box" style="padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); background: #FAF9F5; border: 1.5px solid var(--ledger-paper-border);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                <strong style="font-size: 0.82rem; font-family: var(--font-serif);">Hard Guardrails Audit:</strong>
+                <span id="modal-guardrail-badge" class="rubber-stamp stamp-neutral" style="font-size: 0.68rem;">AWAITING EVALUATION</span>
+              </div>
+              <div id="modal-guardrail-explanation" style="font-size: 0.78rem; font-family: var(--font-mono); white-space: pre-line; line-height: 1.45; color: var(--ink-primary);">
+              </div>
+            </div>
           </div>
         </div>
 

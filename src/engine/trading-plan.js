@@ -73,7 +73,8 @@ export function evaluatePlanTradeLimits({
   plan,
   trades = [],
   candidateRiskPercent,
-  candidateDate = new Date().toISOString()
+  candidateDate = new Date().toISOString(),
+  candidateRiskR = null
 } = {}) {
   const normalized = normalizeTradingPlan(plan);
   const targetDate = dateKey(candidateDate);
@@ -101,6 +102,15 @@ export function evaluatePlanTradeLimits({
       code: 'PLAN_DAILY_LOSS_CAP',
       message: `Today's loss is ${todayLossR.toFixed(2)}R, at or above your ${normalized.maxDailyLossR}R stop.`
     });
+  }
+  if (candidateRiskR !== null && candidateRiskR !== undefined && Number(candidateRiskR) > 0) {
+    const projectedLossR = todayLossR + Number(candidateRiskR);
+    if (todayLossR < normalized.maxDailyLossR && projectedLossR > (normalized.maxDailyLossR + 0.01)) {
+      breaches.push({
+        code: 'PLAN_PROJECTED_LOSS_CAP',
+        message: `Projected loss of ${projectedLossR.toFixed(2)}R exceeds your ${normalized.maxDailyLossR}R daily loss stop if stopped out.`
+      });
+    }
   }
 
   return {

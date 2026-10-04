@@ -1632,3 +1632,18 @@ table.ledger-table tr.row-violation {
   transition: width 0.3s ease;
 }
 
+/* Instrument-Aware Position Sizer & Risk Guardrails HUD */
+#calc-preview {
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+#modal-guardrail-verdict-box {
+  transition: all 0.25s ease-in-out;
+}
+
+#modal-guardrail-explanation {
+  font-size: 0.78rem;
+  letter-spacing: -0.01em;
+  color: var(--ink-primary);
+}
+

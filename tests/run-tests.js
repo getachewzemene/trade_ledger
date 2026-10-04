@@ -12,7 +12,7 @@
  * 9. Monte Carlo Losing Streak Variance Simulator
  */
 
-import { calculateEquityCryptoSize, calculateForexSize, calculateFuturesSize } from '../src/engine/sizing.js';
+import { calculateEquityCryptoSize, calculateForexSize, calculateFuturesSize, getInstrumentSpec, calculateInstrumentAwarePositionSize, evaluateInstrumentRiskGuardrails, FUTURES_SPECS, FOREX_SPECS, CRYPTO_SPECS } from '../src/engine/sizing.js';
 import { calculateRMultiple, calculatePerformanceMetrics, calculateDrawdown, groupTradesBy } from '../src/engine/metrics.js';
 import { normalizeNumber, normalizeDirection, importTradesFromCSV } from '../src/engine/csv-parser.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics } from '../src/engine/leak-detector.js';
@@ -740,6 +740,195 @@ console.log('\n--- Suite 17: Strategy Research Lab & Edge Durability Audit ---')
   assert(typeof stress.stressedNetPnL === 'number', 'Stress test captures 2x friction net PnL');
   assert(stress.stressedNetPnL <= stress.normalNetPnL, 'Doubled spread and slippage degrades net PnL');
   assert(typeof stress.survivesStress === 'boolean', 'Stress test reports survival flag');
+}
+
+// 18. INSTRUMENT-AWARE SIZING & RISK GUARDRAILS
+console.log('\n--- Suite 18: Instrument-Aware Sizing & Hard Risk Guardrails ---');
+{
+  // 1. Instrument Specifications
+  const esSpec = getInstrumentSpec('ES', 'FUTURES');
+  assert(esSpec.supported === true, 'ES futures spec recognized');
+  assertEquals(esSpec.tickOrPipSize, 0.25, 'ES tick size = 0.25');
+  assertEquals(esSpec.tickOrPipValue, 12.50, 'ES tick value = $12.50');
+  assertEquals(esSpec.pointMultiplier, 50, 'ES point multiplier = 50');
+
+  const mesSpec = getInstrumentSpec('MES', 'FUTURES');
+  assertEquals(mesSpec.tickOrPipValue, 1.25, 'MES tick value = $1.25');
+  assertEquals(mesSpec.pointMultiplier, 5, 'MES point multiplier = 5');
+
+  const eurusdSpec = getInstrumentSpec('EURUSD', 'FOREX');
+  assert(eurusdSpec.supported === true, 'EURUSD forex spec recognized');
+  assertEquals(eurusdSpec.tickOrPipSize, 0.0001, 'EURUSD pip size = 0.0001');
+  assertEquals(eurusdSpec.tickOrPipValue, 10.0, 'EURUSD pip value = $10.00 per standard lot');
+
+  const btcSpec = getInstrumentSpec('BTCUSD', 'CRYPTO');
+  assert(btcSpec.supported === true, 'BTCUSD crypto spec recognized');
+  assertEquals(btcSpec.sizeStep, 0.001, 'BTCUSD size step = 0.001');
+
+  const eqSpec = getInstrumentSpec('AAPL', 'EQUITY');
+  assert(eqSpec.supported === true, 'Equity spec recognized');
+  assertEquals(eqSpec.sizeStep, 1, 'Equity size step = 1 share');
+
+  // 2. Cost-Aware Sizing vs Naive Sizing
+  // Scenario: $500 risk budget, 5.00 point stop on ES (20 ticks = $250 nominal risk per contract).
+  // Naive sizing says $500 / $250 = 2 contracts.
+  // But 2 contracts with round-turn commissions ($4.50 ea), spread (1 tick = $12.50 ea), and slippage ($12.50 ea)
+  // adds $29.50/contract * 2 = $59 friction. Total committed risk = $500 + $59 = $559 (exceeds $500 budget!).
+  const naiveSizing = calculateInstrumentAwarePositionSize({
+    assetClass: 'FUTURES',
+    symbol: 'ES',
+    entryPrice: 5000,
+    stopLoss: 4995,
+    accountBalance: 50000,
+    riskPercentage: 1.0, // $500 budget
+    accountForCosts: false
+  });
+  assertEquals(naiveSizing.units, 2, 'Naive sizing yields 2 contracts ignoring costs');
+  assert(naiveSizing.nominalRisk <= 500, 'Naive nominal risk equals budget');
+
+  const costAwareSizing = calculateInstrumentAwarePositionSize({
+    assetClass: 'FUTURES',
+    symbol: 'ES',
+    entryPrice: 5000,
+    stopLoss: 4995,
+    accountBalance: 50000,
+    riskPercentage: 1.0, // $500 budget
+    accountForCosts: true
+  });
+  assertEquals(costAwareSizing.units, 1, 'Cost-aware sizing downsizes to 1 contract to prevent cost breach');
+  assert(costAwareSizing.totalCommittedRisk <= 500, 'Cost-aware total committed risk strictly within $500 budget');
+  assert(costAwareSizing.totalFriction > 0, 'Cost-aware sizing tracks positive friction drag');
+  assertEquals(
+    costAwareSizing.totalCommittedRisk,
+    Math.round((costAwareSizing.nominalRisk + costAwareSizing.totalFriction) * 100) / 100,
+    'Total committed risk equals nominal risk plus estimated friction'
+  );
+
+  // 3. Custom Cost Overrides
+  const customCostSizing = calculateInstrumentAwarePositionSize({
+    assetClass: 'FUTURES',
+    symbol: 'ES',
+    entryPrice: 5000,
+    stopLoss: 4995,
+    accountBalance: 50000,
+    riskPercentage: 1.0,
+    accountForCosts: true,
+    customCommission: 2.00, // discount broker
+    customSpread: 0.25,     // 1 tick spread
+    customSlippage: 0       // zero slippage fill
+  });
+  assertEquals(customCostSizing.totalCommission, 2.00, 'Custom commission override applied correctly');
+
+  // 4. Hard Guardrails - Invalid Price Structure
+  const badGeometry = evaluateInstrumentRiskGuardrails({
+    candidateTrade: {
+      symbol: 'ES',
+      assetClass: 'FUTURES',
+      direction: 'LONG',
+      entryPrice: 5000,
+      stopLoss: 5010 // Stop above entry for LONG!
+    }
+  });
+  assert(badGeometry.canTrade === false, 'Blocks trade when long stop is placed above entry price');
+  assert(badGeometry.verdict === 'BLOCK', 'Verdict is BLOCK on invalid price geometry');
+  assert(badGeometry.breaches.some(b => b.code === 'GEOMETRY_INVALID_STOP'), 'Breach code GEOMETRY_INVALID_STOP flagged');
+
+  // 5. Hard Guardrail - Daily Trade Cap
+  const sampleTodayTrades = [
+    { entryDate: '2026-10-04T09:00:00Z', rMultiple: 1.0, netPnL: 500 },
+    { entryDate: '2026-10-04T11:00:00Z', rMultiple: -1.0, netPnL: -500 },
+    { entryDate: '2026-10-04T13:00:00Z', rMultiple: 1.5, netPnL: 750 }
+  ];
+  const tradeCapGuard = evaluateInstrumentRiskGuardrails({
+    plan: { maxDailyTrades: 3, maxDailyLossR: 3.0 },
+    contract: { maxDailyTrades: 3, maxDailyLossR: 3.0, cooldownMinutes: 0 },
+    trades: sampleTodayTrades,
+    candidateTrade: {
+      symbol: 'ES',
+      assetClass: 'FUTURES',
+      direction: 'LONG',
+      entryPrice: 5000,
+      stopLoss: 4995
+    },
+    candidateDate: '2026-10-04T14:00:00Z'
+  });
+  assert(tradeCapGuard.canTrade === false, 'Hard guardrail blocks further entry at 3/3 daily trade limit');
+  assert(tradeCapGuard.breaches.some(b => b.code === 'PLAN_DAILY_TRADE_CAP'), 'Breach code PLAN_DAILY_TRADE_CAP flagged');
+
+  // 6. Hard Guardrail - Daily Realized Loss Cap
+  const sampleLossTrades = [
+    { entryDate: '2026-10-04T09:00:00Z', rMultiple: -1.0, netPnL: -500 },
+    { entryDate: '2026-10-04T11:00:00Z', rMultiple: -1.0, netPnL: -500 }
+  ];
+  const lossCapGuard = evaluateInstrumentRiskGuardrails({
+    plan: { maxDailyTrades: 5, maxDailyLossR: 2.0 },
+    contract: { maxDailyTrades: 5, maxDailyLossR: 2.0, cooldownMinutes: 0 },
+    trades: sampleLossTrades,
+    candidateTrade: {
+      symbol: 'MES',
+      assetClass: 'FUTURES',
+      direction: 'LONG',
+      entryPrice: 5000,
+      stopLoss: 4995
+    },
+    candidateDate: '2026-10-04T12:00:00Z'
+  });
+  assert(lossCapGuard.canTrade === false, 'Hard guardrail blocks trading when daily loss stop (2.0R) is hit');
+  assert(lossCapGuard.breaches.some(b => b.code === 'PLAN_DAILY_LOSS_CAP'), 'Breach code PLAN_DAILY_LOSS_CAP flagged');
+
+  // 7. Hard Guardrail - Projected Daily Loss Cap (Preventing Potential Breach)
+  // Current loss is 1.5R (under 2.0R limit). But a candidate trade risking 1.0R would bring projected loss to 2.5R!
+  const candidateProjectedGuard = evaluateInstrumentRiskGuardrails({
+    plan: { maxDailyTrades: 5, maxDailyLossR: 2.0, maxRiskPercent: 1.0 },
+    contract: { maxDailyTrades: 5, maxDailyLossR: 2.0, cooldownMinutes: 0 },
+    trades: [
+      { entryDate: '2026-10-04T09:00:00Z', rMultiple: -1.5, netPnL: -750 }
+    ],
+    candidateTrade: {
+      symbol: 'ES',
+      assetClass: 'FUTURES',
+      direction: 'LONG',
+      entryPrice: 5000,
+      stopLoss: 4995,
+      quantity: 2 // 2 contracts = ~2.0R candidate risk
+    },
+    accountBalance: 50000,
+    candidateDate: '2026-10-04T12:00:00Z'
+  });
+  assert(candidateProjectedGuard.canTrade === false, 'Hard guardrail blocks candidate trade whose projected loss breaches daily stop');
+  assert(candidateProjectedGuard.breaches.some(b => b.code === 'PLAN_PROJECTED_LOSS_CAP'), 'Breach code PLAN_PROJECTED_LOSS_CAP flagged');
+
+  // 8. Clear Explanation when the App says "PASS"
+  const passingGuard = evaluateInstrumentRiskGuardrails({
+    plan: { maxDailyTrades: 3, maxDailyLossR: 2.0, maxRiskPercent: 1.0, minimumRewardRisk: 2.0 },
+    contract: { maxDailyTrades: 3, maxDailyLossR: 2.0, cooldownMinutes: 0, enforcePreSession: false },
+    trades: [
+      { entryDate: '2026-10-04T09:00:00Z', rMultiple: 1.5, netPnL: 750 }
+    ],
+    candidateTrade: {
+      symbol: 'MES',
+      assetClass: 'FUTURES',
+      direction: 'LONG',
+      entryPrice: 5000,
+      stopLoss: 4995,
+      takeProfit: 5015 // 3.0 RR
+    },
+    accountBalance: 50000,
+    candidateDate: '2026-10-04T11:00:00Z'
+  });
+  assert(passingGuard.canTrade === true, 'All guardrails approve clean compliant trade');
+  assertEquals(passingGuard.verdict, 'PASS', 'Verdict is PASS');
+  assert(typeof passingGuard.explanation === 'string' && passingGuard.explanation.length > 50, 'Explanation is generated as a detailed string');
+  assert(passingGuard.explanation.includes('PASS: RISK CHECKS VERIFIED ✓'), 'Explanation includes PASS header');
+  assert(passingGuard.explanation.includes('Micro E-mini S&P 500'), 'Explanation mentions instrument name');
+  assert(passingGuard.explanation.includes('Execution Friction:'), 'Explanation details friction breakdown');
+  assert(passingGuard.explanation.includes('Total Committed Risk:'), 'Explanation details total committed risk');
+  assert(passingGuard.explanation.includes('Daily Trade Guardrail:'), 'Explanation details daily trade limit status');
+  assert(passingGuard.explanation.includes('Daily Loss Guardrail:'), 'Explanation details remaining loss buffer');
+
+  // 9. Clear Explanation when the App says "BLOCK"
+  assert(lossCapGuard.explanation.includes('HARD GUARDRAIL BLOCKED ⚠'), 'Blocked explanation includes alert headline');
+  assert(lossCapGuard.explanation.includes('Remediation:'), 'Blocked explanation provides actionable remediation');
 }
 
 console.log('\n================================================================');

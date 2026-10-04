@@ -9,7 +9,7 @@
  */
 
 import { calculatePerformanceMetrics, groupTradesBy } from '../engine/metrics.js';
-import { calculatePositionSize } from '../engine/sizing.js';
+import { calculatePositionSize, calculateInstrumentAwarePositionSize, evaluateInstrumentRiskGuardrails, getInstrumentSpec } from '../engine/sizing.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics, LEAK_DEFINITIONS } from '../engine/leak-detector.js';
 import { buildTradeSummaryReport } from '../engine/reporting.js';
 import { importTradesFromCSV } from '../engine/csv-parser.js';
@@ -1327,6 +1327,16 @@ function setupCalculator() {
   const mfeInput = document.getElementById('form-mfe-price');
   const maePreview = document.getElementById('form-mae-r-preview');
   const mfePreview = document.getElementById('form-mfe-r-preview');
+  const accountForCostsInput = document.getElementById('calc-account-for-costs');
+  const instrumentBadge = document.getElementById('calc-instrument-badge');
+  const frictionHud = document.getElementById('calc-friction-hud');
+  const statNominal = document.getElementById('calc-stat-nominal');
+  const statFriction = document.getElementById('calc-stat-friction');
+  const statCommitted = document.getElementById('calc-stat-committed');
+  const statBuffer = document.getElementById('calc-stat-buffer');
+  const guardrailBox = document.getElementById('modal-guardrail-verdict-box');
+  const guardrailBadge = document.getElementById('modal-guardrail-badge');
+  const guardrailExplanation = document.getElementById('modal-guardrail-explanation');
 
   function updateCalc() {
     const asset = assetInput.value;
@@ -1339,44 +1349,67 @@ function setupCalculator() {
     const mae = parseFloat(maeInput.value);
     const mfe = parseFloat(mfeInput.value);
     const dir = document.getElementById('form-direction').value;
+    const accountForCosts = accountForCostsInput ? accountForCostsInput.checked : true;
 
     if (entry <= 0 || stop <= 0 || entry === stop) {
-      detailsDiv.innerHTML = `<span style="color: var(--ink-muted);">Enter Entry and Stop Loss prices to calculate position size.</span>`;
+      detailsDiv.innerHTML = `<span style="color: var(--ink-muted);">Enter Entry and Stop Loss prices to calculate instrument-aware position size.</span>`;
+      if (frictionHud) frictionHud.style.display = 'none';
       return;
     }
 
-    const sizeResult = calculatePositionSize({
-      assetClass: asset,
-      symbol,
-      entryPrice: entry,
-      stopLoss: stop,
+    const evalResult = evaluateInstrumentRiskGuardrails({
+      plan: tradingPlan,
+      contract: userContract,
+      trades: getPerformanceTrades(),
+      candidateTrade: {
+        symbol,
+        assetClass: asset,
+        direction: dir,
+        entryPrice: entry,
+        stopLoss: stop,
+        takeProfit: tp > 0 ? tp : undefined
+      },
       accountBalance: balance,
-      riskPercentage: riskPct
+      candidateDate: new Date().toISOString(),
+      preSessionLogs: Array.isArray(preSessionLogs) ? preSessionLogs : [],
+      accountForCosts
     });
 
-    let qty = 1;
-    let desc = '';
+    const m = evalResult.metrics;
+    if (instrumentBadge) instrumentBadge.textContent = `${m.symbol || asset} SPEC`;
+    if (frictionHud) frictionHud.style.display = 'block';
 
-    if (asset === 'EQUITY' || asset === 'CRYPTO') {
-      qty = sizeResult.quantity;
-      desc = `Risk: <strong>$${sizeResult.riskBudget.toFixed(2)}</strong> (${riskPct}%) | Distance: <strong>$${sizeResult.distance.toFixed(2)}</strong> | Position Size: <strong>${qty} units</strong> ($${sizeResult.positionValue.toFixed(2)})`;
-    } else if (asset === 'FOREX') {
-      qty = sizeResult.lots;
-      desc = `Risk: <strong>$${sizeResult.riskBudget.toFixed(2)}</strong> | Stop Distance: <strong>${sizeResult.pips} pips</strong> | Recommended Lot Size: <strong>${qty} lots</strong>`;
-    } else if (asset === 'FUTURES') {
-      qty = sizeResult.contracts;
-      desc = `Contract: <strong>${sizeResult.spec.name}</strong> | Stop: <strong>${sizeResult.ticks} ticks</strong> ($${sizeResult.riskPerContract.toFixed(2)}/contract) | Recommended: <strong>${qty} contracts</strong>`;
-    }
+    let desc = `Approved: <strong>${m.units} ${m.units === 1 ? m.unitType.slice(0, -1) : m.unitType}</strong> | Stop: <strong>${m.stopDistance.toFixed(4)}</strong> (${m.ticksOrPips} ${asset === 'FOREX' ? 'pips' : 'ticks/points'}) | Nominal: $${m.nominalRisk.toFixed(2)} + Friction: $${m.estimatedFriction.totalFriction.toFixed(2)} = Committed: <strong>$${m.totalCommittedRisk.toFixed(2)}</strong> (${m.effectiveRiskPercent.toFixed(2)}%)`;
 
     if (tp > 0) {
       const riskDist = Math.abs(entry - stop);
       const rewardDist = Math.abs(tp - entry);
-      const rr = rewardDist / riskDist;
-      desc += ` | Reward-to-Risk: <strong>1:${rr.toFixed(2)}</strong>`;
+      const rr = riskDist > 0 ? (rewardDist / riskDist) : 0;
+      desc += ` | R:R: <strong>1:${rr.toFixed(2)}</strong>`;
     }
 
-    qtyInput.value = qty;
-    detailsDiv.innerHTML = desc;
+    if (qtyInput) qtyInput.value = m.units;
+    if (detailsDiv) detailsDiv.innerHTML = desc;
+
+    if (statNominal) statNominal.textContent = `$${m.nominalRisk.toFixed(2)}`;
+    if (statFriction) statFriction.textContent = `-$${m.estimatedFriction.totalFriction.toFixed(2)}`;
+    if (statCommitted) statCommitted.textContent = `$${m.totalCommittedRisk.toFixed(2)} (${m.effectiveRiskPercent.toFixed(2)}%)`;
+    if (statBuffer) statBuffer.textContent = `${m.remainingDailyLossBufferR.toFixed(2)}R loss stop (${m.remainingTrades} trades left)`;
+
+    if (guardrailBox && guardrailBadge && guardrailExplanation) {
+      if (evalResult.canTrade) {
+        guardrailBox.style.borderColor = 'var(--ledger-profit)';
+        guardrailBox.style.background = '#F2F8F4';
+        guardrailBadge.className = 'rubber-stamp stamp-clean';
+        guardrailBadge.textContent = 'PASS: HARD GUARDRAILS VERIFIED ✓';
+      } else {
+        guardrailBox.style.borderColor = 'var(--ledger-loss)';
+        guardrailBox.style.background = '#FAECEB';
+        guardrailBadge.className = 'rubber-stamp stamp-danger';
+        guardrailBadge.textContent = 'HARD GUARDRAIL BLOCKED ⚠';
+      }
+      guardrailExplanation.textContent = evalResult.explanation;
+    }
 
     if (!isNaN(mae) || !isNaN(mfe)) {
       const exc = calculateExcursionR({
@@ -1396,7 +1429,7 @@ function setupCalculator() {
     const runwayText = document.getElementById('modal-runway-text');
     if (runwayBox && propFirmData && propFirmData.runway && propFirmData.buffer) {
       runwayBox.style.display = 'block';
-      const plannedRisk = sizeResult.riskBudget;
+      const plannedRisk = m.totalCommittedRisk;
       const safeCeiling = propFirmData.runway.safeRiskWithMarginDollars;
       const remCushion = propFirmData.buffer.effectiveImmediateCushionDollars;
       const remR = propFirmData.buffer.effectiveCushionR;
@@ -1413,8 +1446,9 @@ function setupCalculator() {
     }
   }
 
-  [assetInput, symbolInput, entryInput, stopInput, takeProfitInput, balanceInput, riskInput, maeInput, mfeInput].forEach(el => {
+  [assetInput, symbolInput, entryInput, stopInput, takeProfitInput, balanceInput, riskInput, maeInput, mfeInput, accountForCostsInput].forEach(el => {
     el?.addEventListener('input', updateCalc);
+    el?.addEventListener('change', updateCalc);
   });
 }
 
@@ -1770,9 +1804,29 @@ function setupModal() {
       const maePrice = parseFloat(document.getElementById('form-mae-price').value) || undefined;
       const mfePrice = parseFloat(document.getElementById('form-mfe-price').value) || undefined;
 
-      const planLimits = evaluatePlanTradeLimits({ plan: tradingPlan, trades: getPerformanceTrades(), candidateRiskPercent: riskPct });
-      if (!planLimits.canTrade) {
-        alert(planLimits.breaches.map(breach => breach.message).join('\n'));
+      const accountForCosts = document.getElementById('calc-account-for-costs')?.checked ?? true;
+      const guardrailVerdict = evaluateInstrumentRiskGuardrails({
+        plan: tradingPlan,
+        contract: userContract,
+        trades: getPerformanceTrades(),
+        candidateTrade: {
+          symbol,
+          assetClass,
+          direction,
+          entryPrice,
+          stopLoss,
+          takeProfit,
+          quantity,
+          preSessionCompleted: isPreSessionDone
+        },
+        accountBalance: balance,
+        candidateDate: new Date().toISOString(),
+        preSessionLogs: Array.isArray(preSessionLogs) ? preSessionLogs : [],
+        accountForCosts
+      });
+
+      if (!guardrailVerdict.canTrade) {
+        alert(guardrailVerdict.explanation);
         return;
       }
       if (!stopLoss || !takeProfit) {
