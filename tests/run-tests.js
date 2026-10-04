@@ -56,6 +56,19 @@ import {
   evaluateEdgeDurability,
   runFrictionStressTest
 } from '../src/engine/research-lab.js';
+import {
+  calculateWilsonConfidenceInterval,
+  calculateContinuousConfidenceInterval,
+  analyzeTargetAdherenceObservation,
+  analyzeSessionCostDriftObservation,
+  analyzeStopAdherenceObservation,
+  analyzePostLossSequenceObservation,
+  analyzeExcursionObservation,
+  generateTraderHistoryObservations,
+  extractTradeCost,
+  getSampleSizeCaveat,
+  REVIEW_DISCLAIMER
+} from '../src/engine/trader-review.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -1059,6 +1072,228 @@ console.log('\n--- Suite 19: Execution Quality & Process vs Outcome Cohorts ---'
   assert(cohortComparison.disclaimer.includes('Following written entry, stop, target, and exit rules does NOT guarantee'), 'Disclaimer states following rules does NOT guarantee profit');
   assert(cohortComparison.disclaimer.includes('Market results are probabilistic'), 'Disclaimer explains probabilistic nature of market results');
   assert(cohortComparison.disclaimer.includes('Discipline is about control over operational actions, not market outcomes'), 'Disclaimer emphasizes control over actions vs outcomes');
+}
+
+console.log('\n--- Suite 20: Trader History Review & Empirical Observations with Quantified Uncertainty ---');
+{
+  // 1. Wilson score confidence interval mathematical bounds
+  const wilsonZero = calculateWilsonConfidenceInterval(0, 0);
+  assertEquals(wilsonZero.percentage, 0, 'Zero sample size returns 0%');
+  assertEquals(wilsonZero.formatted, '0.0% – 0.0%', 'Zero sample formatted cleanly');
+
+  const wilsonPremature = calculateWilsonConfidenceInterval(13, 18);
+  assertEquals(wilsonPremature.count, 13, 'Event count k = 13');
+  assertEquals(wilsonPremature.total, 18, 'Sample size n = 18');
+  assertEquals(wilsonPremature.percentage, 72.2, 'Proportion 13/18 = 72.2%');
+  assertEquals(wilsonPremature.lowerPercent, 49.1, 'Wilson 95% CI lower bound = 49.1%');
+  assertEquals(wilsonPremature.upperPercent, 87.5, 'Wilson 95% CI upper bound = 87.5%');
+  assertEquals(wilsonPremature.formatted, '49.1% – 87.5%', 'Wilson interval string format correct');
+  assert(wilsonPremature.lowerPercent <= wilsonPremature.upperPercent, 'Wilson interval lower <= upper');
+
+  const wilsonBoundaryZero = calculateWilsonConfidenceInterval(0, 20);
+  assertEquals(wilsonBoundaryZero.percentage, 0, '0 of 20 is 0%');
+  assert(wilsonBoundaryZero.upperPercent > 0, 'Wilson upper bound on 0/20 does not artificially collapse to 0');
+
+  const wilsonBoundaryFull = calculateWilsonConfidenceInterval(20, 20);
+  assertEquals(wilsonBoundaryFull.percentage, 100, '20 of 20 is 100%');
+  assert(wilsonBoundaryFull.lowerPercent < 100, 'Wilson lower bound on 20/20 reflects sample uncertainty');
+
+  // 2. Continuous confidence interval (Sample Mean & Standard Error)
+  const emptyContinuous = calculateContinuousConfidenceInterval([]);
+  assertEquals(emptyContinuous.count, 0, 'Empty array count = 0');
+  assertEquals(emptyContinuous.mean, 0, 'Empty array mean = 0');
+
+  const singleContinuous = calculateContinuousConfidenceInterval([25.0]);
+  assertEquals(singleContinuous.count, 1, 'Single element count = 1');
+  assertEquals(singleContinuous.mean, 25.0, 'Single element mean = 25.0');
+  assertEquals(singleContinuous.standardError, 0, 'Single element standard error = 0');
+
+  const sampleCosts = [12, 15, 14, 18, 20];
+  const costCI = calculateContinuousConfidenceInterval(sampleCosts);
+  assertEquals(costCI.count, 5, 'Sample cost count = 5');
+  assertEquals(costCI.mean, 15.8, 'Sample mean cost = 15.80');
+  assertEquals(costCI.standardError, 1.43, 'Sample cost SE = 1.43');
+  assertEquals(costCI.ciLower, 13.0, 'Sample cost 95% CI lower = 13.00');
+  assertEquals(costCI.ciUpper, 18.6, 'Sample cost 95% CI upper = 18.60');
+  assert(costCI.formatted.includes('15.80 ± 1.43'), 'Continuous CI string formatted with mean and SE');
+
+  // 3. Trade cost extraction
+  const explicitCostTrade = { commissions: 4.50, spreadCost: 12.50, slippageCost: 5.00 };
+  assertEquals(extractTradeCost(explicitCostTrade), 22.0, 'Extracts explicit friction components');
+
+  const specDerivedTrade = { symbol: 'ES', assetClass: 'FUTURES', quantity: 2 };
+  const derivedCost = extractTradeCost(specDerivedTrade);
+  assert(derivedCost > 0, 'Derives transaction friction from instrument specification');
+
+  // 4. Session transaction cost drift observation
+  // 45 morning trades ($6.20 average) vs 20 afternoon trades ($14.80 average)
+  const sessionTrades = [];
+  for (let i = 0; i < 45; i++) {
+    sessionTrades.push({
+      id: `MORNING-${i}`,
+      session: 'MORNING',
+      entryDate: `2026-08-${String(i % 25 + 1).padStart(2, '0')}T09:30:00Z`,
+      commissions: 2.20,
+      spreadCost: 2.00,
+      slippageCost: 2.00, // Total = 6.20
+      source: 'PERSONAL'
+    });
+  }
+  for (let i = 0; i < 20; i++) {
+    sessionTrades.push({
+      id: `AFTERNOON-${i}`,
+      session: 'AFTERNOON',
+      entryDate: `2026-09-${String(i % 25 + 1).padStart(2, '0')}T14:30:00Z`,
+      commissions: 4.80,
+      spreadCost: 5.00,
+      slippageCost: 5.00, // Total = 14.80
+      source: 'PERSONAL'
+    });
+  }
+
+  const costObservation = analyzeSessionCostDriftObservation(sessionTrades, 20);
+  assert(costObservation !== null, 'Cost drift observation generated');
+  assertEquals(costObservation.sampleSize, 20, 'Recent session sample size is 20');
+  assertEquals(costObservation.priorSampleSize, 45, 'Prior session comparison sample size is 45');
+  assertEquals(costObservation.metrics.recentMeanCost, 14.8, 'Recent mean cost is $14.80');
+  assertEquals(costObservation.metrics.priorMeanCost, 6.2, 'Prior mean cost is $6.20');
+  assert(costObservation.observation.includes('Your last 20 trades in the AFTERNOON session had higher average costs'), 'Observation phrases elevated session costs retrospectively');
+  assert(costObservation.observation.includes('n = 20'), 'Observation specifies sample size n = 20');
+  assert(costObservation.observation.includes('n = 45'), 'Observation specifies baseline sample size n = 45');
+  assertEquals(costObservation.isPrediction, false, 'Observation is flagged as NOT a prediction');
+
+  // 5. Target adherence & premature exit observation
+  // 18 trades with planned target: 13 premature exits, 5 reached target
+  const targetTrades = [];
+  for (let i = 0; i < 13; i++) {
+    targetTrades.push({
+      id: `TARGET-EARLY-${i}`,
+      direction: 'LONG',
+      entryPrice: 100,
+      stopLoss: 95,
+      takeProfit: 110, // Planned +2.0R
+      exitPrice: 104,  // Realized +0.8R
+      rMultiple: 0.8,
+      violations: ['EARLY_EXIT'],
+      rulesFollowed: { entry: true, stop: true, target: true, exit: false },
+      netPnL: 80,
+      source: 'PERSONAL'
+    });
+  }
+  for (let i = 0; i < 5; i++) {
+    targetTrades.push({
+      id: `TARGET-REACHED-${i}`,
+      direction: 'LONG',
+      entryPrice: 100,
+      stopLoss: 95,
+      takeProfit: 110,
+      exitPrice: 110,
+      rMultiple: 2.0,
+      violations: [],
+      rulesFollowed: { entry: true, stop: true, target: true, exit: true },
+      netPnL: 200,
+      source: 'PERSONAL'
+    });
+  }
+
+  const targetObservation = analyzeTargetAdherenceObservation(targetTrades);
+  assert(targetObservation !== null, 'Target adherence observation generated');
+  assertEquals(targetObservation.sampleSize, 18, 'Sample size n = 18');
+  assertEquals(targetObservation.eventCount, 13, 'Premature exit count k = 13');
+  assertEquals(targetObservation.percentage, 72.2, 'Premature exit rate = 72.2%');
+  assertEquals(targetObservation.uncertainty.formatted, '49.1% – 87.5%', 'Wilson 95% CI reported');
+  assert(targetObservation.observation.includes('you often exited before your planned target'), 'Phrases observation as frequently exited before planned target');
+  assert(targetObservation.observation.includes('n = 18'), 'Specifies target sample size');
+  assert(targetObservation.observation.includes('49.1% – 87.5%'), 'Includes quantified uncertainty bounds');
+  assertEquals(targetObservation.isPrediction, false, 'Target adherence observation is NOT a prediction');
+
+  // 6. Stop loss invalidation & widening observation
+  // 25 losing trades: 6 with stop widened, 19 with stop respected
+  const lossTrades = [];
+  for (let i = 0; i < 6; i++) {
+    lossTrades.push({
+      id: `LOSS-WIDENED-${i}`,
+      netPnL: -250,
+      plannedRiskDollars: 100,
+      rMultiple: -2.5,
+      violations: ['STOP_WIDENED'],
+      rulesFollowed: { entry: true, stop: false, target: true, exit: true },
+      source: 'PERSONAL'
+    });
+  }
+  for (let i = 0; i < 19; i++) {
+    lossTrades.push({
+      id: `LOSS-NORMAL-${i}`,
+      netPnL: -100,
+      plannedRiskDollars: 100,
+      rMultiple: -1.0,
+      violations: [],
+      rulesFollowed: { entry: true, stop: true, target: true, exit: true },
+      source: 'PERSONAL'
+    });
+  }
+
+  const stopObservation = analyzeStopAdherenceObservation(lossTrades);
+  assert(stopObservation !== null, 'Stop loss observation generated');
+  assertEquals(stopObservation.sampleSize, 25, 'Total losing trades n = 25');
+  assertEquals(stopObservation.eventCount, 6, 'Widened stop count k = 6');
+  assertEquals(stopObservation.percentage, 24.0, 'Widened stop rate = 24.0%');
+  assert(stopObservation.observation.includes('Across your 25 recorded losing trades (n = 25)'), 'Mentions sample size in stop observation text');
+  assert(stopObservation.observation.includes('stop loss was widened beyond planned initial risk in 6 trades (24.0%'), 'Details empirical widened stop count');
+  assertEquals(stopObservation.isPrediction, false, 'Stop loss observation is NOT a prediction');
+
+  // 7. Post-loss sequence observation
+  const sequenceTrades = [
+    { entryDate: '2026-09-01T10:00:00Z', netPnL: -100, source: 'PERSONAL' },
+    { entryDate: '2026-09-01T11:00:00Z', netPnL: 100, isFullyCompliant: true, source: 'PERSONAL' },
+    { entryDate: '2026-09-02T10:00:00Z', netPnL: -100, source: 'PERSONAL' },
+    { entryDate: '2026-09-02T10:30:00Z', netPnL: -200, isFullyCompliant: false, violations: ['REVENGE_TRADE'], source: 'PERSONAL' },
+    { entryDate: '2026-09-03T10:00:00Z', netPnL: 200, isFullyCompliant: true, source: 'PERSONAL' },
+    { entryDate: '2026-09-03T14:00:00Z', netPnL: 150, isFullyCompliant: true, source: 'PERSONAL' }
+  ];
+  const postLossObs = analyzePostLossSequenceObservation(sequenceTrades);
+  assert(postLossObs !== null, 'Post loss sequence observation generated');
+  assertEquals(postLossObs.sampleSize, 3, 'Three trades executed immediately after a loss');
+  assertEquals(postLossObs.comparisonSampleSize, 2, 'Two trades executed immediately after a win');
+  assertEquals(postLossObs.isPrediction, false, 'Post-loss observation is NOT a prediction');
+
+  // 8. Sample size caveats
+  assertEquals(getSampleSizeCaveat(0), 'No historical data recorded.', 'Caveat for n = 0');
+  assert(getSampleSizeCaveat(8).includes('Preliminary observation (8 trades)'), 'Caveat for n < 10 notes high variance');
+  assert(getSampleSizeCaveat(18).includes('Limited sample size (18 trades, n < 30)'), 'Caveat for n < 30 notes wide confidence intervals');
+  assert(getSampleSizeCaveat(45).includes('Robust sample size (45 trades, n ≥ 30)'), 'Caveat for n >= 30 notes statistical stability');
+
+  // 9. Master history review generator & sample data exclusion
+  const mixedTrades = [
+    ...targetTrades,
+    { id: 'SAMPLE-1', source: 'SAMPLE', executionMode: 'SAMPLE', takeProfit: 120, entryPrice: 100, exitPrice: 102 }
+  ];
+
+  const reviewReportDefault = generateTraderHistoryObservations(mixedTrades, { excludeSample: true });
+  assertEquals(reviewReportDefault.scope, 'PERSONAL_AND_IMPORTED', 'Default review scope isolates trader personal/imported data');
+  assertEquals(reviewReportDefault.totalTradesAnalyzed, 18, 'Sample trade excluded from trader history analysis');
+  assert(reviewReportDefault.observations.length >= 1, 'Generates empirical observations');
+  assertEquals(reviewReportDefault.isPrediction, false, 'Report flagged as non-predictive');
+
+  // Verify every observation meets the requirements:
+  reviewReportDefault.observations.forEach(obs => {
+    assert(Number.isInteger(obs.sampleSize), `Observation ${obs.id} has integer sample size`);
+    assert(obs.sampleSize > 0, `Observation ${obs.id} sample size > 0`);
+    assert(obs.uncertainty !== undefined, `Observation ${obs.id} has quantified uncertainty`);
+    assertEquals(obs.isPrediction, false, `Observation ${obs.id} has isPrediction === false`);
+    assert(typeof obs.sampleSizeCaveat === 'string', `Observation ${obs.id} has sample size caveat`);
+  });
+
+  // 10. Reporting integration
+  const fullSummaryReport = buildTradeSummaryReport(targetTrades);
+  assert(Array.isArray(fullSummaryReport.observations), 'Summary report includes observations array');
+  assert(fullSummaryReport.reviewReport !== undefined, 'Summary report includes reviewReport object');
+  assertEquals(fullSummaryReport.observations[0].sampleSize, 18, 'Report observation reflects sample size');
+
+  // 11. Epistemological disclaimer
+  assert(REVIEW_DISCLAIMER.text.includes('All review statements are strictly descriptive observations'), 'Disclaimer states observations are descriptive');
+  assert(REVIEW_DISCLAIMER.text.includes('not constitute forward predictions'), 'Disclaimer confirms no forward predictions');
+  assertEquals(REVIEW_DISCLAIMER.isPrediction, false, 'Disclaimer declares isPrediction: false');
 }
 
 console.log('\n================================================================');

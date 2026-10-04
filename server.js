@@ -42,6 +42,7 @@ import {
   calculateRegimeBreakdown
 } from './src/engine/research-lab.js';
 import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome } from './src/engine/execution-quality.js';
+import { generateTraderHistoryObservations } from './src/engine/trader-review.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -276,8 +277,21 @@ const server = http.createServer((req, res) => {
     const excursion = analyzeExcursionPatterns(analyzed);
     const tilt = evaluateTiltState(analyzed, tradingContract.cooldownMinutes);
     const executionQuality = compareExecutionCohorts(analyzed);
+    const reviewReport = generateTraderHistoryObservations(analyzed);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ metrics, diagnostics, excursion, tilt, executionQuality }));
+    res.end(JSON.stringify({ metrics, diagnostics, excursion, tilt, executionQuality, reviewReport }));
+    return;
+  }
+
+  // GET /api/reviews/observations
+  if (pathname === '/api/reviews/observations' && req.method === 'GET') {
+    const includeSample = parsedUrl.searchParams.get('includeSample') === 'true';
+    const windowSize = parseInt(parsedUrl.searchParams.get('windowSize') || '20', 10);
+    const trades = includeSample ? activeTrades : getPerformanceTrades();
+    const analyzed = analyzeTradeViolations(trades);
+    const observations = generateTraderHistoryObservations(analyzed, { excludeSample: !includeSample, windowSize });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(observations));
     return;
   }
 

@@ -409,6 +409,32 @@
 
       <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin-bottom: 0.75rem;">Detected Trading Leaks Breakdown</h3>
       <div id="leak-breakdown-list" style="display: grid; gap: 1rem;"></div>
+
+      <!-- Empirical Trader History Review Section -->
+      <div class="card" style="margin-top: 1.5rem; border: 1.5px solid var(--accent-brass); background: var(--ledger-paper-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span class="rubber-stamp stamp-clean" style="font-size: 0.7rem;">EMPIRICAL REVIEW</span>
+            <h3 style="font-family: var(--font-serif); font-size: 1.25rem; margin: 0;">Trader History Review: Empirical Observations</h3>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="review-sample-badge" class="badge-source-personal" style="font-family: var(--font-mono); font-size: 0.75rem;">n = 0 PERSONAL TRADES</span>
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">NON-PREDICTIVE</span>
+          </div>
+        </div>
+
+        <!-- Non-Prediction Epistemological Principle Banner -->
+        <div style="background: #FFF; border-left: 4px solid var(--accent-brass); padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.25rem; font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.5;">
+          <strong style="color: var(--ink-primary); font-family: var(--font-serif);">Epistemological Principle:</strong>
+          These review statements are strictly descriptive observations derived from your historical trade ledger, not forward predictions or generic trading advice. Quantified uncertainty (Wilson score and standard error 95% confidence intervals) reflects sample size limits.
+        </div>
+
+        <!-- Review Observations Dynamic List -->
+        <div id="trader-review-observations-list" style="display: grid; gap: 1rem;">
+          <!-- Dynamically populated via JS -->
+          <div style="color: var(--ink-muted); font-size: 0.85rem; font-style: italic;">Log personal trades to generate historical observations...</div>
+        </div>
+      </div>
     </section>
 
     <!-- View 6: Performance, Excursion & Monte Carlo Simulator -->

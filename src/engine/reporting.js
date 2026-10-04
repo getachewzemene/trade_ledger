@@ -1,4 +1,5 @@
 import { isSampleTrade, getTradeCategory } from './trade-provenance.js';
+import { generateTraderHistoryObservations } from './trader-review.js';
 
 export function buildTradeSummaryReport(trades = [], options = {}) {
   const excludeSample = options.excludeSample !== false;
@@ -13,6 +14,8 @@ export function buildTradeSummaryReport(trades = [], options = {}) {
   const averageR = totalTrades === 0 ? 0 : safeTrades.reduce((total, trade) => total + Number(trade.rMultiple || 0), 0) / totalTrades;
   const winRate = totalTrades === 0 ? 0 : Math.round((winningTrades / totalTrades) * 100);
 
+  const reviewReport = generateTraderHistoryObservations(safeTrades, options);
+
   return {
     totalTrades,
     winningTrades,
@@ -21,6 +24,8 @@ export function buildTradeSummaryReport(trades = [], options = {}) {
     averageR: Number(averageR.toFixed(2)),
     violationCount,
     cleanTrades: totalTrades - violationCount,
+    reviewReport,
+    observations: reviewReport.observations,
     csv: buildTradeCsvExport(safeTrades, options)
   };
 }

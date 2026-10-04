@@ -11,6 +11,7 @@
 import { calculatePerformanceMetrics, groupTradesBy } from '../engine/metrics.js';
 import { calculatePositionSize, calculateInstrumentAwarePositionSize, evaluateInstrumentRiskGuardrails, getInstrumentSpec } from '../engine/sizing.js';
 import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome, EXECUTION_DISCLAIMER } from '../engine/execution-quality.js';
+import { generateTraderHistoryObservations, REVIEW_DISCLAIMER } from '../engine/trader-review.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics, LEAK_DEFINITIONS } from '../engine/leak-detector.js';
 import { buildTradeSummaryReport } from '../engine/reporting.js';
 import { importTradesFromCSV } from '../engine/csv-parser.js';
@@ -470,6 +471,7 @@ function refreshAllViews() {
   renderDisciplineTape();
   renderTradeTable();
   renderLeakDiagnostics();
+  renderTraderReviewObservations();
   renderDashboardSummary();
   renderPerformanceMetrics();
   renderExecutionQualityStudio();
@@ -655,6 +657,67 @@ function renderLeakDiagnostics() {
 }
 
 /**
+ * Render Empirical Trader History Review Observations
+ * Strictly retrospective observations with sample sizes and quantified uncertainty.
+ */
+function renderTraderReviewObservations() {
+  const performanceTrades = getPerformanceTrades();
+  const reviewReport = generateTraderHistoryObservations(performanceTrades, { excludeSample: true });
+
+  const badgeEl = document.getElementById('review-sample-badge');
+  if (badgeEl) {
+    badgeEl.textContent = `n = ${reviewReport.totalTradesAnalyzed} PERSONAL TRADES`;
+  }
+
+  const listContainer = document.getElementById('trader-review-observations-list');
+  if (!listContainer) return;
+
+  if (!reviewReport.observations || reviewReport.observations.length === 0) {
+    listContainer.innerHTML = `
+      <div class="card" style="padding: 1rem; color: var(--ink-muted); font-size: 0.85rem; font-style: italic; background: #FFF;">
+        No personal trades recorded yet. Log your personal trades to generate historical observations with statistical uncertainty bounds.
+      </div>
+    `;
+    return;
+  }
+
+  listContainer.innerHTML = reviewReport.observations.map(obs => {
+    let uncertaintyPill = '';
+    if (obs.uncertainty?.type === 'WILSON_SCORE_95') {
+      uncertaintyPill = `<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;" title="Wilson Score 95% Confidence Interval">95% CI: ${obs.uncertainty.formatted}</span>`;
+    } else if (obs.uncertainty?.type === 'MEAN_CONFIDENCE_INTERVAL_95') {
+      const u = obs.uncertainty.recent || obs.uncertainty.mfe || obs.uncertainty;
+      uncertaintyPill = `<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;" title="Sample Mean ± Standard Error (95% CI)">95% CI: [${u.ciLower !== undefined ? u.ciLower.toFixed(2) : ''}, ${u.ciUpper !== undefined ? u.ciUpper.toFixed(2) : ''}]</span>`;
+    } else if (obs.uncertainty?.type === 'WILSON_SCORE_DUAL_95') {
+      uncertaintyPill = `<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;" title="Dual Cohort 95% Confidence Intervals">95% CI: ${obs.uncertainty.afterLoss?.formatted || ''} vs ${obs.uncertainty.afterWin?.formatted || ''}</span>`;
+    }
+
+    return `
+      <div class="card" style="background: #FFF; border: 1px solid var(--ledger-paper-border); padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; flex-wrap: wrap;">
+              <span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">${obs.topic.toUpperCase()}</span>
+              <span class="badge-source-personal" style="font-size: 0.7rem; font-family: var(--font-mono);">n = ${obs.sampleSize}</span>
+              ${uncertaintyPill}
+            </div>
+            <h4 style="font-family: var(--font-serif); font-size: 1.05rem; margin: 0; color: var(--ink-primary);">${obs.headline}</h4>
+          </div>
+          <span class="rubber-stamp stamp-neutral" style="font-size: 0.6rem; opacity: 0.85;">DESCRIPTIVE OBSERVATION</span>
+        </div>
+        <p style="font-size: 0.85rem; line-height: 1.6; color: var(--ink-primary); margin: 0.5rem 0;">
+          ${obs.observation}
+        </p>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--ledger-paper-border); font-size: 0.75rem; color: var(--ink-muted); flex-wrap: wrap; gap: 0.5rem;">
+          <span>${obs.sampleSizeCaveat}</span>
+          <span style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent-brass);">Retrospective data only • Not a prediction</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
  * 4. Render Executive Dashboard Summary
  */
 function renderDashboardSummary() {
@@ -680,6 +743,17 @@ function renderDashboardSummary() {
     return `• ${trade.symbol} ${trade.direction} — ${pnl >= 0 ? '+$' : '-$'}${Math.abs(pnl).toFixed(2)} / ${trade.disciplineGrade || 'N/A'}`;
   }).join('<br>');
 
+  const topObservation = report.observations && report.observations.length > 0 ? report.observations[0] : null;
+  const obsHtml = topObservation ? `
+    <div class="card-title" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+      <span>Empirical History Read</span>
+      <span class="rubber-stamp stamp-clean" style="font-size: 0.6rem;">n = ${topObservation.sampleSize}</span>
+    </div>
+    <div style="font-size: 0.8rem; line-height: 1.45; color: var(--ink-primary); margin-top: 0.35rem; background: #FFF; padding: 0.5rem; border-radius: var(--radius-sm); border-left: 3px solid var(--accent-brass);">
+      <strong>${topObservation.headline}:</strong> ${topObservation.observation}
+    </div>
+  ` : '';
+
   reportPanel.innerHTML = `
     <div class="report-card">
       <div class="card-title">Quick operational read</div>
@@ -688,6 +762,7 @@ function renderDashboardSummary() {
         <div><strong>Average R:</strong> ${report.averageR >= 0 ? '+' : ''}${report.averageR.toFixed(2)}R</div>
         <div><strong>Clean trades:</strong> ${report.cleanTrades}</div>
       </div>
+      ${obsHtml}
       <div class="card-title" style="margin-top: 1rem;">Most recent trades</div>
       <div class="report-list">${recentTrades || 'No trades logged yet.'}</div>
     </div>
@@ -2137,23 +2212,45 @@ function setupExport() {
       const summary = await res.json();
       const panel = document.getElementById('report-summary-panel');
       if (!panel) return;
+
+      const obsListHtml = Array.isArray(summary.observations) && summary.observations.length > 0
+        ? summary.observations.map(o => `
+            <div style="margin-top: 0.6rem; padding: 0.65rem 0.85rem; background: #FFF; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border); font-size: 0.82rem; line-height: 1.5;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; flex-wrap: wrap; gap: 0.4rem;">
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                  <strong style="color: var(--ink-primary); font-family: var(--font-serif);">${o.headline}</strong>
+                  <span class="badge-source-personal" style="font-size: 0.65rem; font-family: var(--font-mono);">n = ${o.sampleSize}</span>
+                </div>
+                <span class="rubber-stamp stamp-neutral" style="font-size: 0.6rem;">OBSERVATION</span>
+              </div>
+              <div style="color: var(--ink-primary);">${o.observation}</div>
+              <div style="margin-top: 0.35rem; font-size: 0.72rem; color: var(--ink-muted); font-style: italic;">${o.sampleSizeCaveat}</div>
+            </div>
+          `).join('')
+        : '<div style="font-size: 0.82rem; color: var(--ink-muted); font-style: italic; margin-top: 0.5rem;">Log personal trades to generate historical observations with uncertainty bounds.</div>';
+
       panel.innerHTML = `
         <div class="report-card">
-          <div class="card-title">Daily summary</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <div class="card-title">Trader History Summary & Review</div>
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.6rem;">DESCRIPTIVE OBSERVATIONS ONLY</span>
+          </div>
           <div class="report-list">
             <div><strong>Trades:</strong> ${summary.totalTrades}</div>
             <div><strong>Win rate:</strong> ${summary.winRate}%</div>
             <div><strong>Net PnL:</strong> ${summary.netPnL >= 0 ? '+$' : '-$'}${Math.abs(summary.netPnL).toFixed(2)}</div>
             <div><strong>Violations:</strong> ${summary.violationCount}</div>
           </div>
+          <div class="card-title" style="margin-top: 1rem;">Empirical History Observations (No Predictions)</div>
+          ${obsListHtml}
         </div>
       `;
       document.querySelectorAll('.nav-btn').forEach((btn) => btn.classList.remove('active'));
       document.querySelectorAll('.view-section').forEach((section) => section.classList.remove('active'));
-      const analyticsBtn = document.querySelector('[data-view="analytics-view"]');
-      const analyticsView = document.getElementById('analytics-view');
-      analyticsBtn?.classList.add('active');
-      analyticsView?.classList.add('active');
+      const leaksBtn = document.querySelector('[data-view="leaks-view"]');
+      const leaksView = document.getElementById('leaks-view');
+      leaksBtn?.classList.add('active');
+      leaksView?.classList.add('active');
     } catch (err) {
       console.warn('Report fetch failed', err);
     }
