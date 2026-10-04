@@ -40,6 +40,21 @@ import { createSessionState, saveSessionState, loadSessionState, clearSessionSta
 import { DEFAULT_PLAN_RULES, DEFAULT_TRADING_PLAN, normalizeTradingPlan, evaluatePlanReadiness, evaluatePlanTradeLimits } from '../src/engine/trading-plan.js';
 import { renderCandlestickPatternChart, renderLessonTopicChart } from '../src/engine/lesson-charts.js';
 import { TRADE_SOURCES, TRADE_CATEGORIES, filterPerformanceTrades, filterTradesByCategory, isDemoTrade, isSimulatedTrade, isSampleTrade, isImportedTrade, isPersonalTrade, getTradeCategory, getTradeSourceLabel, getTradeSourceBadgeClass, getModeBannerText, normalizeTradeSource, tagLegacySampleTrades, tagTradesWithSource } from '../src/engine/trade-provenance.js';
+import {
+  MARKET_REGIMES,
+  SESSIONS,
+  RESEARCH_PRESETS,
+  generateHistoricalDataset,
+  calculateIndicators,
+  evaluateBarEntryCondition,
+  runStrategyBacktest,
+  calculateLabCohortMetrics,
+  calculateUncertaintyMetrics,
+  calculateRegimeBreakdown,
+  calculateFrictionAudit,
+  evaluateEdgeDurability,
+  runFrictionStressTest
+} from '../src/engine/research-lab.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -619,6 +634,112 @@ console.log('\n--- Suite 16: Trade Provenance & Sample Isolation ---');
   assert(getTradeSourceBadgeClass(demo).includes('source-simulated'), 'Badge class for demo record contains source-simulated');
   assert(getTradeSourceBadgeClass(imported).includes('source-imported'), 'Badge class for imported record contains source-imported');
   assert(getTradeSourceBadgeClass(personal).includes('source-personal'), 'Badge class for personal record contains source-personal');
+}
+
+// --- Suite 17: Strategy Research Lab & Edge Durability Audit ---
+console.log('\n--- Suite 17: Strategy Research Lab & Edge Durability Audit ---');
+{
+  // 1. Dataset Generation & Indicator Computation
+  const dataset = generateHistoricalDataset({
+    symbol: 'EURUSD',
+    totalBars: 300,
+    trainSplit: 0.60,
+    startPrice: 1.0800,
+    seed: 42
+  });
+
+  assertEquals(dataset.bars.length, 300, 'Generates requested number of bars');
+  const inSampleBars = dataset.bars.filter(b => b.partition === 'IN_SAMPLE');
+  const oosBars = dataset.bars.filter(b => b.partition === 'OUT_OF_SAMPLE');
+  assertEquals(inSampleBars.length, 180, 'In-sample partition contains 60% of bars (180)');
+  assertEquals(oosBars.length, 120, 'Out-of-sample partition contains 40% of bars (120)');
+
+  // Regimes and technical indicators
+  const regimesFound = new Set(dataset.bars.map(b => b.regime));
+  assert(regimesFound.has(MARKET_REGIMES.BULL_TREND), 'Dataset includes BULL_TREND regime');
+  assert(regimesFound.has(MARKET_REGIMES.BEAR_TREND), 'Dataset includes BEAR_TREND regime');
+  assert(regimesFound.has(MARKET_REGIMES.CHOP_RANGE), 'Dataset includes CHOP_RANGE regime');
+  assert(regimesFound.has(MARKET_REGIMES.HIGH_VOLATILITY), 'Dataset includes HIGH_VOLATILITY regime');
+
+  const sampleBar = dataset.bars[50];
+  assert(typeof sampleBar.ema20 === 'number' && sampleBar.ema20 > 0, 'Computes EMA20');
+  assert(typeof sampleBar.ema50 === 'number' && sampleBar.ema50 > 0, 'Computes EMA50');
+  assert(typeof sampleBar.atr14 === 'number' && sampleBar.atr14 > 0, 'Computes ATR14');
+  assert(typeof sampleBar.rsi14 === 'number' && sampleBar.rsi14 >= 0 && sampleBar.rsi14 <= 100, 'Computes RSI14');
+  assert(typeof sampleBar.donchianHigh20 === 'number', 'Computes Donchian 20-bar High');
+  assert(typeof sampleBar.donchianLow20 === 'number', 'Computes Donchian 20-bar Low');
+
+  // 2. Realistic Fill Execution & Friction Modeling
+  const backtest = runStrategyBacktest(dataset.bars, RESEARCH_PRESETS.TREND_PULLBACK_CONFLUENCE);
+  assert(Array.isArray(backtest.trades), 'Backtest generates array of executed trades');
+  assert(backtest.total.totalTrades > 0, 'Strategy triggered trades across the historical dataset');
+
+  // Verify friction deductions
+  const sampleTrade = backtest.trades[0];
+  assert(sampleTrade.commissionPaid > 0, 'Trade incurs commission costs');
+  assert(sampleTrade.spreadPaid > 0, 'Trade incurs bid-ask spread crossing cost');
+  assert(sampleTrade.entrySlippage >= 0 && sampleTrade.exitSlippage >= 0, 'Trade models realistic entry and exit slippage');
+  assert(sampleTrade.netPnL !== sampleTrade.grossPnL, 'Net PnL reflects execution friction drag');
+
+  // Verify Stop Loss gap slippage model
+  const stopLossFills = backtest.trades.filter(t => t.exitReason === 'STOP_LOSS');
+  if (stopLossFills.length > 0) {
+    const gapStopTrade = stopLossFills[0];
+    assert(gapStopTrade.exitPrice !== gapStopTrade.stopLoss || gapStopTrade.exitSlippage > 0, 'Stop loss fills model gap/slippage rather than idealized zero-drag fills');
+  }
+
+  // 3. In-Sample vs. Out-of-Sample Separation & Overfit Decay
+  assert(typeof backtest.inSample.winRate === 'number', 'In-sample win rate calculated');
+  assert(typeof backtest.outOfSample.winRate === 'number', 'Out-of-sample win rate calculated');
+  assert(typeof backtest.decay.winRateDelta === 'number', 'Calculates win rate decay delta');
+  assert(typeof backtest.decay.averageRDecayPercent === 'number', 'Calculates expectancy decay %');
+  assert(['LOW', 'MODERATE', 'HIGH'].includes(backtest.decay.overfitHazard), 'Classifies overfit hazard');
+
+  // 4. Overfit Curve-Fit Demo Detection
+  const overfitBacktest = runStrategyBacktest(dataset.bars, RESEARCH_PRESETS.FRAGILE_OVERFIT_DEMO);
+  assert(
+    overfitBacktest.decay.overfitHazard === 'HIGH' || 
+    overfitBacktest.durability.verdict === 'FRAGILE_OVERFIT' || 
+    overfitBacktest.durability.verdict === 'NO_EDGE' ||
+    overfitBacktest.durability.score < 50,
+    'Overfit demo setup correctly identified as fragile / non-durable edge'
+  );
+
+  // 5. Statistical Uncertainty & Monte Carlo Path Resampling
+  const uncertainty = backtest.uncertainty;
+  assert(typeof uncertainty.winRateWilsonCI.lower === 'number' && typeof uncertainty.winRateWilsonCI.upper === 'number', 'Wilson 95% confidence interval computed for win rate');
+  assert(uncertainty.winRateWilsonCI.lower <= uncertainty.winRateWilsonCI.upper, 'Wilson CI lower bound <= upper bound');
+  assert(typeof uncertainty.expectancy95CI.lower === 'number' && typeof uncertainty.expectancy95CI.upper === 'number', '95% Standard Error interval computed for expectancy R');
+  assert(uncertainty.theoreticalMaxLossStreak >= 1, 'Calculates theoretical max losing streak expectation');
+  assert(uncertainty.monteCarloResampling.iterations === 500, 'Runs 500-iteration Monte Carlo path resampling');
+  assert(typeof uncertainty.monteCarloResampling.p5OutcomeDollars === 'number', 'Computes P5 worst-case drawdown outcome');
+  assert(typeof uncertainty.monteCarloResampling.p50OutcomeDollars === 'number', 'Computes P50 median outcome');
+  assert(typeof uncertainty.monteCarloResampling.ruinRiskPercent === 'number', 'Computes risk of severe drawdown / ruin');
+
+  // 6. Market Regime Performance Breakdown
+  const regimes = backtest.regimeBreakdown;
+  assert(regimes[MARKET_REGIMES.BULL_TREND] !== undefined, 'Breakdown tracks BULL_TREND');
+  assert(regimes[MARKET_REGIMES.BEAR_TREND] !== undefined, 'Breakdown tracks BEAR_TREND');
+  assert(regimes[MARKET_REGIMES.CHOP_RANGE] !== undefined, 'Breakdown tracks CHOP_RANGE');
+  assert(regimes[MARKET_REGIMES.HIGH_VOLATILITY] !== undefined, 'Breakdown tracks HIGH_VOLATILITY');
+
+  // 7. Friction Drag Audit
+  const friction = backtest.frictionAudit;
+  assert(friction.totalCommissionsPaid > 0, 'Audit tallies total commissions');
+  assert(friction.totalSpreadCostDollars > 0, 'Audit tallies total spread costs');
+  assert(friction.totalSlippageCostDollars > 0, 'Audit tallies total slippage and gap costs');
+  assertEquals(
+    friction.netProfitDollars, 
+    Math.round((friction.grossProfitDollars - friction.totalFrictionDollars) * 100) / 100, 
+    'Net profit equals gross profit minus total execution friction'
+  );
+
+  // 8. 2x Friction Liquidity Stress Test
+  const stress = runFrictionStressTest(dataset.bars, RESEARCH_PRESETS.TREND_PULLBACK_CONFLUENCE);
+  assert(typeof stress.normalNetPnL === 'number', 'Stress test captures baseline net PnL');
+  assert(typeof stress.stressedNetPnL === 'number', 'Stress test captures 2x friction net PnL');
+  assert(stress.stressedNetPnL <= stress.normalNetPnL, 'Doubled spread and slippage degrades net PnL');
+  assert(typeof stress.survivesStress === 'boolean', 'Stress test reports survival flag');
 }
 
 console.log('\n================================================================');

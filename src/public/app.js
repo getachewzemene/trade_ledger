@@ -51,6 +51,18 @@ import {
   tagLegacySampleTrades,
   tagTradesWithSource
 } from '../engine/trade-provenance.js';
+import {
+  RESEARCH_PRESETS,
+  MARKET_REGIMES,
+  SESSIONS,
+  generateHistoricalDataset,
+  runStrategyBacktest,
+  runFrictionStressTest,
+  evaluateEdgeDurability,
+  calculateFrictionAudit,
+  calculateUncertaintyMetrics,
+  calculateRegimeBreakdown
+} from '../engine/research-lab.js';
 
 // Application State
 let trades = [];
@@ -390,6 +402,7 @@ async function initApp() {
   setupPlaybook();
   setupTradingPlan();
   setupSessionSystem();
+  setupResearchLab();
 
   const storedSession = loadSessionState(window.localStorage);
   if (storedSession && isSessionActive(storedSession)) {
@@ -2443,3 +2456,452 @@ function renderPlaybookView() {
     `).join('');
   }
 }
+
+/**
+ * 24. Setup Strategy Research Lab & Edge Durability Audit Controller
+ */
+const ASSET_DATASET_CONFIGS = {
+  EURUSD: { symbol: 'EURUSD', startPrice: 1.0850, spread: 0.00015, slippage: 0.00010, commission: 3.50 },
+  ES: { symbol: 'ES', startPrice: 5120.00, spread: 0.25, slippage: 0.25, commission: 4.50 },
+  NVDA: { symbol: 'NVDA', startPrice: 880.00, spread: 0.10, slippage: 0.08, commission: 1.00 },
+  BTCUSD: { symbol: 'BTCUSD', startPrice: 65000.00, spread: 12.00, slippage: 15.00, commission: 6.00 }
+};
+
+let currentLabDataset = null;
+let currentLabBacktestResult = null;
+let currentLabStressResult = null;
+
+function populateLabPresetForm(presetKey) {
+  const preset = RESEARCH_PRESETS[presetKey] || RESEARCH_PRESETS.TREND_PULLBACK_CONFLUENCE;
+  const assetKey = document.getElementById('lab-asset-select')?.value || 'EURUSD';
+  const assetConfig = ASSET_DATASET_CONFIGS[assetKey] || ASSET_DATASET_CONFIGS.EURUSD;
+
+  const dirSelect = document.getElementById('lab-direction-select');
+  if (dirSelect) dirSelect.value = preset.direction || 'BOTH';
+
+  const trendAlign = document.getElementById('lab-trend-align');
+  if (trendAlign) trendAlign.value = preset.indicators?.trendAlignment || 'WITH_TREND';
+
+  const fastEma = document.getElementById('lab-fast-ema');
+  if (fastEma) fastEma.value = preset.indicators?.fastEma || 20;
+
+  const slowEma = document.getElementById('lab-slow-ema');
+  if (slowEma) slowEma.value = preset.indicators?.slowEma || 50;
+
+  const rsiMin = document.getElementById('lab-rsi-min');
+  if (rsiMin) rsiMin.value = preset.indicators?.rsiMin ?? 40;
+
+  const rsiMax = document.getElementById('lab-rsi-max');
+  if (rsiMax) rsiMax.value = preset.indicators?.rsiMax ?? 65;
+
+  const donchian = document.getElementById('lab-donchian');
+  if (donchian) donchian.value = preset.indicators?.donchianBreakout || 'NONE';
+
+  const confirmation = document.getElementById('lab-confirmation');
+  if (confirmation) confirmation.value = preset.indicators?.confirmationPattern || 'NONE';
+
+  const regimeFilter = document.getElementById('lab-regime-filter');
+  if (regimeFilter) regimeFilter.value = preset.indicators?.regimeFilter || 'ALL';
+
+  const sessionFilter = document.getElementById('lab-session-filter');
+  if (sessionFilter) sessionFilter.value = preset.indicators?.sessionFilter || 'ALL';
+
+  const slAtr = document.getElementById('lab-sl-atr');
+  if (slAtr) slAtr.value = preset.riskRules?.stopLossAtrMultiple ?? 1.5;
+
+  const tpR = document.getElementById('lab-tp-r');
+  if (tpR) tpR.value = preset.riskRules?.takeProfitRMultiple ?? 2.0;
+
+  const beR = document.getElementById('lab-be-r');
+  if (beR) beR.value = preset.riskRules?.breakevenRMultiple ?? 1.0;
+
+  const maxBars = document.getElementById('lab-max-bars');
+  if (maxBars) maxBars.value = preset.riskRules?.maxHoldingBars ?? 40;
+
+  const commEl = document.getElementById('lab-commission');
+  if (commEl) commEl.value = preset.friction?.commissionPerTrade ?? assetConfig.commission;
+
+  const spreadEl = document.getElementById('lab-spread');
+  if (spreadEl) spreadEl.value = preset.friction?.spreadPoints ?? assetConfig.spread;
+
+  const slippageEl = document.getElementById('lab-slippage');
+  if (slippageEl) slippageEl.value = preset.friction?.slippagePoints ?? assetConfig.slippage;
+
+  const gapEl = document.getElementById('lab-gap-mult');
+  if (gapEl) gapEl.value = preset.friction?.gapSlippageMultiplier ?? 1.5;
+}
+
+function extractLabStrategyFromUI() {
+  const presetKey = document.getElementById('lab-preset-select')?.value || 'TREND_PULLBACK_CONFLUENCE';
+  const basePreset = RESEARCH_PRESETS[presetKey] || RESEARCH_PRESETS.TREND_PULLBACK_CONFLUENCE;
+
+  const direction = document.getElementById('lab-direction-select')?.value || 'BOTH';
+  const trendAlignment = document.getElementById('lab-trend-align')?.value || 'WITH_TREND';
+  const fastEma = parseInt(document.getElementById('lab-fast-ema')?.value, 10) || 20;
+  const slowEma = parseInt(document.getElementById('lab-slow-ema')?.value, 10) || 50;
+  const rsiMin = parseFloat(document.getElementById('lab-rsi-min')?.value) || 0;
+  const rsiMax = parseFloat(document.getElementById('lab-rsi-max')?.value) || 100;
+  const donchianBreakout = document.getElementById('lab-donchian')?.value || 'NONE';
+  const confirmationPattern = document.getElementById('lab-confirmation')?.value || 'NONE';
+  const regimeFilter = document.getElementById('lab-regime-filter')?.value || 'ALL';
+  const sessionFilter = document.getElementById('lab-session-filter')?.value || 'ALL';
+
+  const stopLossAtrMultiple = parseFloat(document.getElementById('lab-sl-atr')?.value) || 1.5;
+  const takeProfitRMultiple = parseFloat(document.getElementById('lab-tp-r')?.value) || 2.0;
+  const breakevenRMultiple = parseFloat(document.getElementById('lab-be-r')?.value) || 1.0;
+  const maxHoldingBars = parseInt(document.getElementById('lab-max-bars')?.value, 10) || 40;
+
+  const commissionPerTrade = parseFloat(document.getElementById('lab-commission')?.value) || 3.50;
+  const spreadPoints = parseFloat(document.getElementById('lab-spread')?.value) || 0.00015;
+  const slippagePoints = parseFloat(document.getElementById('lab-slippage')?.value) || 0.00010;
+  const gapSlippageMultiplier = parseFloat(document.getElementById('lab-gap-mult')?.value) || 1.5;
+
+  return {
+    id: `CUSTOM_${Date.now()}`,
+    name: basePreset.name,
+    direction,
+    indicators: {
+      trendAlignment,
+      fastEma,
+      slowEma,
+      rsiMin,
+      rsiMax,
+      donchianBreakout,
+      confirmationPattern,
+      regimeFilter,
+      sessionFilter
+    },
+    riskRules: {
+      stopLossAtrMultiple,
+      takeProfitRMultiple,
+      breakevenRMultiple,
+      maxHoldingBars
+    },
+    friction: {
+      commissionPerTrade,
+      spreadPoints,
+      slippagePoints,
+      gapSlippageMultiplier
+    }
+  };
+}
+
+function extractLabDatasetOptionsFromUI() {
+  const assetKey = document.getElementById('lab-asset-select')?.value || 'EURUSD';
+  const assetConfig = ASSET_DATASET_CONFIGS[assetKey] || ASSET_DATASET_CONFIGS.EURUSD;
+  const totalBars = parseInt(document.getElementById('lab-total-bars')?.value, 10) || 600;
+  const trainSplit = (parseFloat(document.getElementById('lab-train-split')?.value) || 65) / 100;
+
+  return {
+    symbol: assetConfig.symbol,
+    totalBars,
+    trainSplit,
+    startPrice: assetConfig.startPrice,
+    seed: 42
+  };
+}
+
+function renderResearchLabResults(result, stressResult = null) {
+  if (!result) return;
+  currentLabBacktestResult = result;
+  if (stressResult) currentLabStressResult = stressResult;
+
+  const { inSample, outOfSample, decay, uncertainty, regimeBreakdown, frictionAudit, durability, trades: fillTrades } = result;
+
+  // 1. Durability Scorecard
+  const scoreCard = document.getElementById('lab-scorecard-card');
+  const verdictStamp = document.getElementById('lab-verdict-stamp');
+  const scoreVal = document.getElementById('lab-score-val');
+  const warnBanner = document.getElementById('lab-warning-banner');
+  const strengthsList = document.getElementById('lab-strengths-list');
+  const deductionsList = document.getElementById('lab-deductions-list');
+
+  if (scoreVal) scoreVal.textContent = durability.score;
+  if (verdictStamp) {
+    verdictStamp.className = `rubber-stamp ${durability.verdictClass || 'stamp-clean'}`;
+    verdictStamp.textContent = durability.badgeLabel;
+  }
+  if (scoreCard) {
+    const borderColor = durability.score >= 70 ? 'var(--ledger-profit)' : (durability.score >= 50 ? 'var(--accent-brass)' : 'var(--ledger-loss)');
+    scoreCard.style.borderLeftColor = borderColor;
+  }
+  if (warnBanner) {
+    if (durability.warningNote) {
+      warnBanner.style.display = 'block';
+      warnBanner.textContent = durability.warningNote;
+    } else {
+      warnBanner.style.display = 'none';
+    }
+  }
+  if (strengthsList) {
+    strengthsList.innerHTML = (durability.strengths || []).map(s => `<li>${s}</li>`).join('') || '<li>None qualified under strict durability criteria.</li>';
+  }
+  if (deductionsList) {
+    deductionsList.innerHTML = (durability.deductions || []).map(d => `<li>${d}</li>`).join('') || '<li>No major durability deductions detected.</li>';
+  }
+
+  // 2. In-Sample Partition Cards
+  const isBarsBadge = document.getElementById('lab-is-bars-badge');
+  const isSplitPct = Math.round((parseFloat(document.getElementById('lab-train-split')?.value) || 65));
+  if (isBarsBadge) isBarsBadge.textContent = `${inSample.totalBars} bars (${isSplitPct}%)`;
+  document.getElementById('lab-is-trades').textContent = inSample.totalTrades;
+  document.getElementById('lab-is-winrate').textContent = `${inSample.winRate}%`;
+  document.getElementById('lab-is-avgr').textContent = `${inSample.averageR >= 0 ? '+' : ''}${inSample.averageR} R`;
+  document.getElementById('lab-is-pf').textContent = inSample.profitFactor >= 999 ? '∞' : inSample.profitFactor;
+  document.getElementById('lab-is-dd').textContent = `${inSample.maxDrawdownPercent}%`;
+  const isNetEl = document.getElementById('lab-is-netpnl');
+  if (isNetEl) {
+    isNetEl.textContent = (inSample.netPnL >= 0 ? '+$' : '-$') + Math.abs(inSample.netPnL).toFixed(2);
+    isNetEl.style.color = inSample.netPnL >= 0 ? 'var(--ledger-gain)' : 'var(--ledger-loss)';
+  }
+
+  // 3. Out-of-Sample Partition Cards
+  const oosBarsBadge = document.getElementById('lab-oos-bars-badge');
+  if (oosBarsBadge) oosBarsBadge.textContent = `${outOfSample.totalBars} bars (${100 - isSplitPct}%)`;
+  document.getElementById('lab-oos-trades').textContent = outOfSample.totalTrades;
+  document.getElementById('lab-oos-winrate').textContent = `${outOfSample.winRate}%`;
+  document.getElementById('lab-oos-avgr').textContent = `${outOfSample.averageR >= 0 ? '+' : ''}${outOfSample.averageR} R`;
+  document.getElementById('lab-oos-pf').textContent = outOfSample.profitFactor >= 999 ? '∞' : outOfSample.profitFactor;
+  document.getElementById('lab-oos-dd').textContent = `${outOfSample.maxDrawdownPercent}%`;
+  const oosNetEl = document.getElementById('lab-oos-netpnl');
+  if (oosNetEl) {
+    oosNetEl.textContent = (outOfSample.netPnL >= 0 ? '+$' : '-$') + Math.abs(outOfSample.netPnL).toFixed(2);
+    oosNetEl.style.color = outOfSample.netPnL >= 0 ? 'var(--ledger-gain)' : 'var(--ledger-loss)';
+  }
+
+  // 4. Overfit Decay HUD
+  const hazardBadge = document.getElementById('lab-decay-hazard-badge');
+  if (hazardBadge) {
+    if (decay.overfitHazard === 'HIGH') {
+      hazardBadge.className = 'rubber-stamp stamp-danger';
+      hazardBadge.textContent = 'HIGH OVERFIT HAZARD ✗';
+    } else if (decay.overfitHazard === 'MODERATE') {
+      hazardBadge.className = 'rubber-stamp stamp-warning';
+      hazardBadge.textContent = 'MODERATE OVERFIT HAZARD ⚠';
+    } else {
+      hazardBadge.className = 'rubber-stamp stamp-clean';
+      hazardBadge.textContent = 'LOW OVERFIT RISK ✓';
+    }
+  }
+  document.getElementById('lab-decay-wr').textContent = `${decay.winRateDelta >= 0 ? '+' : ''}${decay.winRateDelta}%`;
+  document.getElementById('lab-decay-avgr').textContent = `${decay.averageRDecayPercent}%`;
+  document.getElementById('lab-decay-pf').textContent = `${decay.profitFactorDecayPercent}%`;
+  document.getElementById('lab-decay-dd').textContent = `${decay.drawdownExpansionPercent >= 0 ? '+' : ''}${decay.drawdownExpansionPercent}%`;
+
+  // 5. Statistical Uncertainty & Monte Carlo
+  if (uncertainty) {
+    document.getElementById('lab-ci-winrate').textContent = uncertainty.winRateWilsonCI?.formatted || '--';
+    document.getElementById('lab-ci-avgr').textContent = uncertainty.expectancy95CI?.formatted || '--';
+    const sampleEl = document.getElementById('lab-sample-viability');
+    if (sampleEl) {
+      sampleEl.textContent = `${uncertainty.sampleViability} (N=${uncertainty.sampleSize})`;
+      sampleEl.style.color = uncertainty.sampleViability === 'VALID_SAMPLE' ? 'var(--ledger-gain)' : 'var(--ledger-loss)';
+    }
+    document.getElementById('lab-streak-compare').textContent = `${uncertainty.observedMaxLossStreak} observed vs ${uncertainty.theoreticalMaxLossStreak} theoretical`;
+
+    const mc = uncertainty.monteCarloResampling;
+    if (mc) {
+      document.getElementById('lab-mc-p5').textContent = `$${mc.p5OutcomeDollars >= 0 ? '+' : ''}${mc.p5OutcomeDollars}`;
+      document.getElementById('lab-mc-p50').textContent = `$${mc.p50OutcomeDollars >= 0 ? '+' : ''}${mc.p50OutcomeDollars}`;
+      document.getElementById('lab-mc-ruin').textContent = `${mc.ruinRiskPercent}%`;
+    }
+  }
+
+  // 6. Regime Breakdown Table
+  const regimeTbody = document.getElementById('lab-regime-tbody');
+  if (regimeTbody && regimeBreakdown) {
+    const regimes = Object.keys(regimeBreakdown);
+    regimeTbody.innerHTML = regimes.map(rk => {
+      const reg = regimeBreakdown[rk];
+      let stamp = '<span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">ROBUST</span>';
+      if (reg.resilience === 'FRAGILE') {
+        stamp = '<span class="rubber-stamp stamp-danger" style="font-size: 0.65rem;">HOSTILE / LEAK</span>';
+      } else if (reg.resilience === 'MODERATE') {
+        stamp = '<span class="rubber-stamp stamp-warning" style="font-size: 0.65rem;">NEUTRAL</span>';
+      }
+
+      return `
+        <tr>
+          <td><strong>${rk.replace('_', ' ')}</strong></td>
+          <td>${reg.barsCount}</td>
+          <td>${reg.tradesCount}</td>
+          <td>${reg.tradesCount > 0 ? `${reg.winRate}%` : '--'}</td>
+          <td style="font-weight: bold; color: ${reg.netPnL >= 0 ? 'var(--ledger-gain)' : 'var(--ledger-loss)'};">
+            ${reg.tradesCount > 0 ? (reg.netPnL >= 0 ? '+$' : '-$') + Math.abs(reg.netPnL).toFixed(2) : '--'}
+          </td>
+          <td>${reg.tradesCount > 0 ? `${reg.averageR >= 0 ? '+' : ''}${reg.averageR} R` : '--'}</td>
+          <td>${stamp}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // 7. Friction Drag Audit
+  if (frictionAudit) {
+    document.getElementById('lab-fric-gross').textContent = (frictionAudit.grossProfitDollars >= 0 ? '+$' : '-$') + Math.abs(frictionAudit.grossProfitDollars).toFixed(2);
+    document.getElementById('lab-fric-comm').textContent = `-$${frictionAudit.totalCommissionsPaid.toFixed(2)}`;
+    document.getElementById('lab-fric-spread').textContent = `-$${frictionAudit.totalSpreadCostDollars.toFixed(2)}`;
+    document.getElementById('lab-fric-slippage').textContent = `-$${frictionAudit.totalSlippageCostDollars.toFixed(2)}`;
+    const fricNetEl = document.getElementById('lab-fric-net');
+    if (fricNetEl) {
+      fricNetEl.textContent = (frictionAudit.netProfitDollars >= 0 ? '+$' : '-$') + Math.abs(frictionAudit.netProfitDollars).toFixed(2);
+      fricNetEl.style.color = frictionAudit.netProfitDollars >= 0 ? 'var(--ledger-gain)' : 'var(--ledger-loss)';
+    }
+    document.getElementById('lab-fric-drag').textContent = `${frictionAudit.frictionDragPercent}%`;
+  }
+
+  // 8. Friction Stress Test
+  const stressBadge = document.getElementById('lab-stress-badge');
+  const stressDetails = document.getElementById('lab-stress-details');
+  if (stressResult && stressBadge && stressDetails) {
+    if (stressResult.survivesStress) {
+      stressBadge.className = 'rubber-stamp stamp-clean';
+      stressBadge.textContent = 'SURVIVES 2x FRICTION ✓';
+      stressDetails.innerHTML = `Strategy remains profitable under doubled spread and slippage (Stressed PnL: <strong>$${stressResult.stressedNetPnL.toFixed(2)}</strong> vs Normal: $${stressResult.normalNetPnL.toFixed(2)}, Friction Decay: ${stressResult.pnlDecayPercent}%).`;
+    } else {
+      stressBadge.className = 'rubber-stamp stamp-danger';
+      stressBadge.textContent = 'WIPED OUT BY 2x FRICTION ✗';
+      stressDetails.innerHTML = `Strategy profits completely evaporate under doubled spread and slippage (Stressed PnL: <strong>$${stressResult.stressedNetPnL.toFixed(2)}</strong> vs Normal: $${stressResult.normalNetPnL.toFixed(2)}, Friction Decay: ${stressResult.pnlDecayPercent}%). Edge is fragile to liquidity.`;
+    }
+  }
+
+  // 9. Order Fill Log
+  const fillsTbody = document.getElementById('lab-fills-tbody');
+  const countBadge = document.getElementById('lab-fill-count-badge');
+  if (fillsTbody && fillTrades) {
+    if (countBadge) countBadge.textContent = `${fillTrades.length} FILLS`;
+    if (fillTrades.length === 0) {
+      fillsTbody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: var(--ink-muted); padding: 1rem;">No trades generated matching setup criteria.</td></tr>`;
+      return;
+    }
+
+    const previewFills = fillTrades.slice(0, 50);
+    fillsTbody.innerHTML = previewFills.map((t, idx) => {
+      const isOos = t.partition === 'OUT_OF_SAMPLE';
+      const partBadge = isOos
+        ? '<span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">OOS VALIDATION</span>'
+        : '<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">IN-SAMPLE</span>';
+
+      const pnl = t.netPnL || 0;
+      const pnlColor = pnl >= 0 ? 'var(--ledger-gain)' : 'var(--ledger-loss)';
+      const pnlText = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+      const rText = (t.rMultiple >= 0 ? '+' : '') + Number(t.rMultiple || 0).toFixed(2) + 'R';
+
+      let reasonBadge = `<span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">${t.exitReason}</span>`;
+      if (t.exitReason === 'STOP_LOSS') reasonBadge = `<span class="rubber-stamp stamp-danger" style="font-size: 0.65rem;">STOP LOSS</span>`;
+      if (t.exitReason === 'BREAKEVEN') reasonBadge = `<span class="rubber-stamp stamp-warning" style="font-size: 0.65rem;">BREAKEVEN</span>`;
+      if (t.exitReason === 'TIME_STOP') reasonBadge = `<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">MAX BARS</span>`;
+
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${partBadge}</td>
+          <td><strong>${t.direction}</strong></td>
+          <td style="font-size: 0.72rem; color: var(--ink-secondary);">${t.regime}</td>
+          <td>${t.entryBar}</td>
+          <td>${t.exitBar}</td>
+          <td>${t.entryPrice.toFixed(4)}</td>
+          <td>${t.exitPrice.toFixed(4)}</td>
+          <td>${reasonBadge}</td>
+          <td style="color: var(--ledger-loss);">${(t.entrySlippage + t.exitSlippage).toFixed(5)}</td>
+          <td style="font-weight: bold; color: ${pnlColor};">${rText}</td>
+          <td style="font-weight: bold; color: ${pnlColor};">${pnlText}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+}
+
+async function runLabAudit(executeStress = false) {
+  const runBtn = document.getElementById('btn-run-lab-backtest');
+  const stressBtn = document.getElementById('btn-run-lab-stress');
+  if (runBtn) runBtn.textContent = '⏳ Auditing Setup Rules...';
+
+  const strategy = extractLabStrategyFromUI();
+  const datasetOptions = extractLabDatasetOptionsFromUI();
+
+  try {
+    let backtestData = null;
+    let stressData = null;
+
+    try {
+      const response = await fetch('/api/research/backtest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy, datasetOptions })
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        backtestData = payload.backtest;
+        stressData = payload.stressTest;
+      }
+    } catch (apiErr) {
+      console.warn('API backtest failed, running engine in browser', apiErr);
+    }
+
+    if (!backtestData) {
+      currentLabDataset = generateHistoricalDataset(datasetOptions);
+      backtestData = runStrategyBacktest(currentLabDataset.bars, strategy);
+      stressData = runFrictionStressTest(currentLabDataset.bars, strategy);
+    }
+
+    renderResearchLabResults(backtestData, stressData);
+  } catch (err) {
+    console.error('Research Lab Error:', err);
+    alert(`Research Lab execution failed: ${err.message}`);
+  } finally {
+    if (runBtn) runBtn.textContent = '⚡ Run Backtest & Lab Audit';
+  }
+}
+
+function setupResearchLab() {
+  const presetSelect = document.getElementById('lab-preset-select');
+  const assetSelect = document.getElementById('lab-asset-select');
+  const reloadPresetBtn = document.getElementById('btn-load-preset');
+  const runBacktestBtn = document.getElementById('btn-run-lab-backtest');
+  const runStressBtn = document.getElementById('btn-run-lab-stress');
+
+  if (presetSelect) {
+    presetSelect.addEventListener('change', () => {
+      populateLabPresetForm(presetSelect.value);
+    });
+  }
+
+  if (assetSelect) {
+    assetSelect.addEventListener('change', () => {
+      const assetKey = assetSelect.value;
+      const assetConfig = ASSET_DATASET_CONFIGS[assetKey] || ASSET_DATASET_CONFIGS.EURUSD;
+      if (document.getElementById('lab-spread')) document.getElementById('lab-spread').value = assetConfig.spread;
+      if (document.getElementById('lab-slippage')) document.getElementById('lab-slippage').value = assetConfig.slippage;
+      if (document.getElementById('lab-commission')) document.getElementById('lab-commission').value = assetConfig.commission;
+    });
+  }
+
+  if (reloadPresetBtn) {
+    reloadPresetBtn.addEventListener('click', () => {
+      populateLabPresetForm(presetSelect?.value || 'TREND_PULLBACK_CONFLUENCE');
+    });
+  }
+
+  if (runBacktestBtn) {
+    runBacktestBtn.addEventListener('click', () => {
+      runLabAudit(false);
+    });
+  }
+
+  if (runStressBtn) {
+    runStressBtn.addEventListener('click', async () => {
+      runStressBtn.textContent = '⏳ Running 2x Stress...';
+      try {
+        await runLabAudit(true);
+      } finally {
+        runStressBtn.textContent = '🛡️ 2x Friction Stress Test';
+      }
+    });
+  }
+
+  // Populate initial preset values and run initial backtest
+  populateLabPresetForm('TREND_PULLBACK_CONFLUENCE');
+  runLabAudit(false);
+}
+

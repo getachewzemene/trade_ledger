@@ -1578,3 +1578,57 @@ table.ledger-table tr.row-violation {
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--ledger-gain);
 }
+
+/* Strategy Research Lab & Edge Durability Styles */
+.lab-cohort-card {
+  background: var(--ledger-paper-base);
+  border: 1px solid var(--ledger-paper-border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-ledger);
+}
+
+.lab-cohort-is {
+  border-top: 4px solid #2B6CB0;
+}
+
+.lab-cohort-oos {
+  border-top: 4px solid var(--ledger-profit);
+}
+
+.lab-stat-box {
+  background: var(--ledger-paper-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem;
+  text-align: center;
+}
+
+.lab-stat-box .lab-label {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  display: block;
+}
+
+.lab-stat-box .lab-val {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ink-primary);
+  margin-top: 0.2rem;
+}
+
+.lab-meter-container {
+  height: 8px;
+  background: var(--ledger-paper-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.lab-meter-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+

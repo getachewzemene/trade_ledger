@@ -30,6 +30,17 @@ import {
 import { validateTradePayload, normalizeTradePayload } from './src/engine/validation.js';
 import { buildTradeSummaryReport, buildTradeCsvExport } from './src/engine/reporting.js';
 import { filterPerformanceTrades, tagLegacySampleTrades, tagTradesWithSource, TRADE_SOURCES } from './src/engine/trade-provenance.js';
+import {
+  RESEARCH_PRESETS,
+  MARKET_REGIMES,
+  generateHistoricalDataset,
+  runStrategyBacktest,
+  runFrictionStressTest,
+  evaluateEdgeDurability,
+  calculateFrictionAudit,
+  calculateUncertaintyMetrics,
+  calculateRegimeBreakdown
+} from './src/engine/research-lab.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -500,6 +511,61 @@ const server = http.createServer((req, res) => {
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ...result, imported: validatedTrades.length, skipped: result.trades.length - validatedTrades.length }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // GET /api/research/presets
+  if (pathname === '/api/research/presets' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(RESEARCH_PRESETS));
+    return;
+  }
+
+  // GET /api/research/datasets
+  if (pathname === '/api/research/datasets' && req.method === 'GET') {
+    const datasets = [
+      { id: 'EURUSD', name: 'EUR/USD (Forex 15M)', symbol: 'EURUSD', startPrice: 1.0850, defaultSpread: 0.00015, defaultSlippage: 0.00010, defaultComm: 3.50 },
+      { id: 'ES', name: 'E-mini S&P 500 (Futures 5M)', symbol: 'ES', startPrice: 5120.00, defaultSpread: 0.25, defaultSlippage: 0.25, defaultComm: 4.50 },
+      { id: 'NVDA', name: 'NVDA (Equities 5M)', symbol: 'NVDA', startPrice: 880.00, defaultSpread: 0.10, defaultSlippage: 0.08, defaultComm: 1.00 },
+      { id: 'BTCUSD', name: 'BTC/USD (Crypto 15M)', symbol: 'BTCUSD', startPrice: 65000.00, defaultSpread: 12.00, defaultSlippage: 15.00, defaultComm: 6.00 }
+    ];
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(datasets));
+    return;
+  }
+
+  // POST /api/research/backtest
+  if (pathname === '/api/research/backtest' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const strategy = payload.strategy || RESEARCH_PRESETS.TREND_PULLBACK_CONFLUENCE;
+        const datasetOptions = payload.datasetOptions || { symbol: 'EURUSD', totalBars: 600, trainSplit: 0.65, startPrice: 1.0850, seed: 42 };
+
+        const dataset = generateHistoricalDataset(datasetOptions);
+        const backtestResult = runStrategyBacktest(dataset.bars, strategy);
+        const stressResult = runFrictionStressTest(dataset.bars, strategy);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          dataset: {
+            symbol: dataset.symbol,
+            totalBars: dataset.bars.length,
+            trainSplit: dataset.trainSplit,
+            inSampleBars: dataset.bars.filter(b => b.partition === 'IN_SAMPLE').length,
+            outOfSampleBars: dataset.bars.filter(b => b.partition === 'OUT_OF_SAMPLE').length,
+            regimes: Array.from(new Set(dataset.bars.map(b => b.regime)))
+          },
+          backtest: backtestResult,
+          stressTest: stressResult
+        }));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));

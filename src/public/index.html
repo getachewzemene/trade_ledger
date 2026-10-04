@@ -32,6 +32,7 @@
       <button class="nav-btn" data-view="contract-view">Trader's Oath</button>
       <button class="nav-btn" data-view="propfirm-view">Prop Firm Guardian 🛡️</button>
       <button class="nav-btn" data-view="playbook-view">Playbook & Edge 🎯</button>
+      <button class="nav-btn" data-view="research-lab-view">Strategy Lab 🧪</button>
       <button class="nav-btn" data-view="leaks-view">Discipline & Leaks</button>
       <button class="nav-btn" data-view="analytics-view">Performance & Variance</button>
       <button class="nav-btn" data-view="curriculum-view">Price Action Lessons</button>
@@ -876,6 +877,506 @@
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;" id="playbook-cards-container">
           <!-- Populated via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- View 12: Strategy Research Lab & Edge Durability Audit -->
+    <section id="research-lab-view" class="view-section">
+      <!-- Lab Header -->
+      <div class="propfirm-header-bar" style="margin-bottom: 1.25rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.7rem;">STRATEGY RESEARCH LAB</span>
+            <span class="brand-badge" style="font-size: 0.7rem;">EDGE DURABILITY AUDIT</span>
+          </div>
+          <h2 style="font-family: var(--font-serif); font-size: 1.6rem; color: var(--ink-primary); margin: 0;">
+            Strategy Research Lab &amp; Edge Durability Audit
+          </h2>
+          <p style="color: var(--ink-secondary); font-size: 0.85rem; margin: 0.35rem 0 0 0;">
+            Test precise setup rules against multi-regime historical data with realistic fills, commissions, bid-ask spread, and stop loss gap slippage.
+            A winning backtest alone is not evidence of a durable edge.
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+          <button id="btn-run-lab-backtest" class="btn btn-primary">⚡ Run Backtest &amp; Lab Audit</button>
+          <button id="btn-run-lab-stress" class="btn btn-secondary">🛡️ 2x Friction Stress Test</button>
+        </div>
+      </div>
+
+      <!-- Preset and Dataset Bar -->
+      <div class="card" style="margin-bottom: 1.25rem; background: var(--ledger-paper-subtle); border: 1.5px solid var(--accent-brass);">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; flex: 1;">
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-muted); display: block; margin-bottom: 0.25rem;">RESEARCH PRESET</label>
+              <select id="lab-preset-select" class="form-control" style="font-weight: 600; min-width: 250px;">
+                <option value="TREND_PULLBACK_CONFLUENCE">Trend Continuation Pullback (Multi-Regime)</option>
+                <option value="BREAKOUT_EXPANSION">Breakout Volatility Expansion (Donchian)</option>
+                <option value="MEAN_REVERSION_RANGE">Range Mean Reversion (RSI Extremes)</option>
+                <option value="FRAGILE_OVERFIT_DEMO">Overfitted Curve-Fit Demo (High Decay Hazard)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-muted); display: block; margin-bottom: 0.25rem;">BENCHMARK ASSET</label>
+              <select id="lab-asset-select" class="form-control" style="min-width: 170px;">
+                <option value="EURUSD">EUR/USD (Forex 15M)</option>
+                <option value="ES">E-mini S&amp;P 500 (Futures 5M)</option>
+                <option value="NVDA">NVDA (Equities 5M)</option>
+                <option value="BTCUSD">BTC/USD (Crypto 15M)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-muted); display: block; margin-bottom: 0.25rem;">ORDER DIRECTION</label>
+              <select id="lab-direction-select" class="form-control" style="min-width: 140px;">
+                <option value="BOTH">LONG &amp; SHORT (Both)</option>
+                <option value="LONG">LONG ONLY</option>
+                <option value="SHORT">SHORT ONLY</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <button id="btn-load-preset" class="btn btn-secondary btn-sm">↺ Reload Preset Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Strategy Rule Formulation Accordion/Card -->
+      <div class="card" style="margin-bottom: 1.25rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid var(--ledger-paper-border); padding-bottom: 0.5rem;">
+          <h3 style="font-family: var(--font-serif); font-size: 1.15rem; margin: 0;">1. Precise Setup Rules &amp; Execution Friction Parameters</h3>
+          <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">Parameters directly drive mechanical entry evaluation and realistic fill models.</span>
+        </div>
+
+        <form id="lab-strategy-form">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+            <!-- Indicator & Signal Rules -->
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">Trend Alignment Rule</label>
+              <select id="lab-trend-align" class="form-control">
+                <option value="WITH_TREND">With Trend (Fast EMA &gt; Slow EMA)</option>
+                <option value="COUNTER_TREND">Counter Trend (Fade Moving Averages)</option>
+                <option value="ANY">Any Alignment (Ignore Trend)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">Fast EMA / Slow EMA</label>
+              <div style="display: flex; gap: 0.5rem;">
+                <input type="number" id="lab-fast-ema" class="form-control" value="20" title="Fast EMA Period">
+                <input type="number" id="lab-slow-ema" class="form-control" value="50" title="Slow EMA Period">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">RSI Min &amp; Max Filter</label>
+              <div style="display: flex; gap: 0.5rem;">
+                <input type="number" id="lab-rsi-min" class="form-control" value="40" placeholder="Min" title="RSI Min">
+                <input type="number" id="lab-rsi-max" class="form-control" value="65" placeholder="Max" title="RSI Max">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">Donchian Breakout Trigger</label>
+              <select id="lab-donchian" class="form-control">
+                <option value="NONE">None (Disabled)</option>
+                <option value="UPPER">Upper Channel Breakout (20-bar High)</option>
+                <option value="LOWER">Lower Channel Breakdown (20-bar Low)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">Candle Confirmation</label>
+              <select id="lab-confirmation" class="form-control">
+                <option value="NONE">None (Immediate Entry on Rule Match)</option>
+                <option value="BULLISH_ENGULFING">Bullish Engulfing Pattern</option>
+                <option value="BEARISH_ENGULFING">Bearish Engulfing Pattern</option>
+                <option value="PIN_BAR">Pin Bar / Long Shadow Rejection</option>
+                <option value="ANY">Any Price Action Rejection Candle</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">Market Regime Filter</label>
+              <select id="lab-regime-filter" class="form-control">
+                <option value="ALL">All Regimes Allowed</option>
+                <option value="BULL_TREND">Bull Trend Only</option>
+                <option value="BEAR_TREND">Bear Trend Only</option>
+                <option value="CHOP_RANGE">Chop / Rangebound Only</option>
+                <option value="HIGH_VOLATILITY">High Volatility Only</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label style="font-size: 0.75rem; font-family: var(--font-mono); text-transform: uppercase; color: var(--ink-secondary);">Trading Session Filter</label>
+              <select id="lab-session-filter" class="form-control">
+                <option value="ALL">All Sessions Allowed</option>
+                <option value="LONDON_OPEN">London Open (07:00 - 10:30 UTC)</option>
+                <option value="NY_OPEN">NY Open Killzone (13:30 - 16:30 UTC)</option>
+                <option value="LUNCH_CHOP">NY Lunch Chop (16:30 - 18:30 UTC)</option>
+                <option value="ASIAN_RANGE">Asian Range (00:00 - 07:00 UTC)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Risk & Friction Section -->
+          <div style="background: var(--ledger-paper-base); padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border); display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Stop Loss (x ATR14)</label>
+              <input type="number" step="0.1" id="lab-sl-atr" class="form-control" value="1.5">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Take Profit (R multiple)</label>
+              <input type="number" step="0.1" id="lab-tp-r" class="form-control" value="2.0">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Breakeven Move at (R)</label>
+              <input type="number" step="0.1" id="lab-be-r" class="form-control" value="1.0">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Max Holding Bars (Time Stop)</label>
+              <input type="number" id="lab-max-bars" class="form-control" value="40">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Commission / Trade ($)</label>
+              <input type="number" step="0.1" id="lab-commission" class="form-control" value="3.50">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Bid-Ask Spread (Points)</label>
+              <input type="number" step="any" id="lab-spread" class="form-control" value="0.00015">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Adverse Slippage (Points)</label>
+              <input type="number" step="any" id="lab-slippage" class="form-control" value="0.00010">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Stop Gap Slippage Multiplier</label>
+              <input type="number" step="0.1" id="lab-gap-mult" class="form-control" value="1.5">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">In-Sample Calibration (%)</label>
+              <input type="number" id="lab-train-split" class="form-control" value="65" min="40" max="85">
+            </div>
+            <div>
+              <label style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--ink-secondary);">Historical Bars Sample</label>
+              <input type="number" id="lab-total-bars" class="form-control" value="600" min="200" max="2000">
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- Durability Scorecard Banner -->
+      <div id="lab-scorecard-card" class="card" style="margin-bottom: 1.25rem; border-left: 6px solid var(--ledger-profit); background: var(--ledger-paper-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; text-transform: uppercase; color: var(--ink-muted); display: block;">RESEARCH AUDIT VERDICT</span>
+            <div style="display: flex; align-items: baseline; gap: 0.75rem; margin-top: 0.25rem;">
+              <span id="lab-verdict-stamp" class="rubber-stamp stamp-clean" style="font-size: 1.05rem;">DURABLE EDGE (RESEARCH READY) ✓</span>
+              <span style="font-family: var(--font-serif); font-size: 1.25rem; color: var(--ink-primary);">Edge Durability Score: <strong id="lab-score-val">82</strong> / 100</span>
+            </div>
+          </div>
+          <div id="lab-warning-banner" style="display: none; max-width: 480px; font-size: 0.82rem; color: var(--ledger-loss); background: #FAECEB; padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-loss);">
+            <!-- Warning text populated via JS -->
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--ledger-paper-border); font-size: 0.83rem;">
+          <div>
+            <strong style="color: var(--ledger-profit);">✓ Validated Strengths:</strong>
+            <ul id="lab-strengths-list" style="margin: 0.35rem 0 0 1.2rem; padding: 0; color: var(--ink-secondary);">
+              <li>Awaiting backtest execution...</li>
+            </ul>
+          </div>
+          <div>
+            <strong style="color: var(--ledger-loss);">⚠ Fragility &amp; Deductions:</strong>
+            <ul id="lab-deductions-list" style="margin: 0.35rem 0 0 1.2rem; padding: 0; color: var(--ink-secondary);">
+              <li>Awaiting backtest execution...</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comparative Partitioning Grid: In-Sample vs Out-of-Sample -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;">
+        <!-- In-Sample Card -->
+        <div class="card" style="border-top: 4px solid #2B6CB0; background: #FAF9F5;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div>
+              <span class="rubber-stamp stamp-neutral" style="font-size: 0.68rem;">DEVELOPMENT DATA</span>
+              <h3 style="font-family: var(--font-serif); font-size: 1.2rem; margin: 0.2rem 0 0 0;">In-Sample (Calibration)</h3>
+            </div>
+            <span id="lab-is-bars-badge" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">390 bars (65%)</span>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Hypothesis formation &amp; rule calibration window. High performance here is expected.
+          </p>
+
+          <div class="summary-grid" style="grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Trades</span>
+              <strong id="lab-is-trades" class="summary-value" style="font-size: 1.15rem;">--</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Win Rate</span>
+              <strong id="lab-is-winrate" class="summary-value" style="font-size: 1.15rem;">--%</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Avg Expectancy</span>
+              <strong id="lab-is-avgr" class="summary-value" style="font-size: 1.15rem;">-- R</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Profit Factor</span>
+              <strong id="lab-is-pf" class="summary-value" style="font-size: 1.15rem;">--</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Max Drawdown</span>
+              <strong id="lab-is-dd" class="summary-value" style="font-size: 1.15rem;">--%</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Net Realized PnL</span>
+              <strong id="lab-is-netpnl" class="summary-value" style="font-size: 1.15rem;">--</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Out-of-Sample Card -->
+        <div class="card" style="border-top: 4px solid var(--ledger-profit); background: #FAF9F5;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div>
+              <span class="rubber-stamp stamp-clean" style="font-size: 0.68rem;">BLIND VALIDATION DATA</span>
+              <h3 style="font-family: var(--font-serif); font-size: 1.2rem; margin: 0.2rem 0 0 0;">Out-of-Sample (Truth Test)</h3>
+            </div>
+            <span id="lab-oos-bars-badge" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">210 bars (35%)</span>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Unseen historical regime data. The true test of whether the edge survives after parameter lock.
+          </p>
+
+          <div class="summary-grid" style="grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Trades</span>
+              <strong id="lab-oos-trades" class="summary-value" style="font-size: 1.15rem;">--</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Win Rate</span>
+              <strong id="lab-oos-winrate" class="summary-value" style="font-size: 1.15rem;">--%</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Avg Expectancy</span>
+              <strong id="lab-oos-avgr" class="summary-value" style="font-size: 1.15rem;">-- R</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Profit Factor</span>
+              <strong id="lab-oos-pf" class="summary-value" style="font-size: 1.15rem;">--</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Max Drawdown</span>
+              <strong id="lab-oos-dd" class="summary-value" style="font-size: 1.15rem;">--%</strong>
+            </div>
+            <div class="summary-card" style="padding: 0.5rem;">
+              <span class="summary-label">Net Realized PnL</span>
+              <strong id="lab-oos-netpnl" class="summary-value" style="font-size: 1.15rem;">--</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Edge Degradation & Decay HUD -->
+      <div class="card" style="margin-bottom: 1.25rem; background: var(--ledger-paper-base);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <strong style="font-family: var(--font-serif); font-size: 1rem;">OOS Degradation &amp; Overfit Decay Audit</strong>
+          <span id="lab-decay-hazard-badge" class="rubber-stamp stamp-clean" style="font-size: 0.7rem;">LOW OVERFIT RISK</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; text-align: center;">
+          <div style="padding: 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+            <span style="font-size: 0.72rem; color: var(--ink-muted); font-family: var(--font-mono); display: block;">WIN RATE DELTA</span>
+            <strong id="lab-decay-wr" style="font-size: 1.1rem; color: var(--ink-primary);">--</strong>
+          </div>
+          <div style="padding: 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+            <span style="font-size: 0.72rem; color: var(--ink-muted); font-family: var(--font-mono); display: block;">EXPECTANCY DECAY</span>
+            <strong id="lab-decay-avgr" style="font-size: 1.1rem; color: var(--ink-primary);">--</strong>
+          </div>
+          <div style="padding: 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+            <span style="font-size: 0.72rem; color: var(--ink-muted); font-family: var(--font-mono); display: block;">PROFIT FACTOR DECAY</span>
+            <strong id="lab-decay-pf" style="font-size: 1.1rem; color: var(--ink-primary);">--</strong>
+          </div>
+          <div style="padding: 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+            <span style="font-size: 0.72rem; color: var(--ink-muted); font-family: var(--font-mono); display: block;">DRAWDOWN EXPANSION</span>
+            <strong id="lab-decay-dd" style="font-size: 1.1rem; color: var(--ink-primary);">--</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Statistical Uncertainty & Losing Streak Risk Card -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;">
+        <!-- Uncertainty & Confidence Intervals -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0;">Statistical Uncertainty &amp; Standard Error</h4>
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">95% CONFIDENCE</span>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Because backtests have finite sample size, point estimates like "58% win rate" hide significant statistical error.
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Wilson 95% Win Rate CI:</span>
+              <strong id="lab-ci-winrate" style="font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Expectancy 95% Error Range:</span>
+              <strong id="lab-ci-avgr" style="font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Sample Size Viability:</span>
+              <strong id="lab-sample-viability" style="font-family: var(--font-mono);">--</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Losing Streak Risk & Monte Carlo -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0;">Losing Streak &amp; Monte Carlo Risk</h4>
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">500 SIM PATHS</span>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Losing streaks are mathematically guaranteed even in a pristine edge. Path resampling quantifies worst-case drawdowns.
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Observed vs Theoretical Max Loss Streak:</span>
+              <strong id="lab-streak-compare" style="font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Monte Carlo P5 (Worst 5% Drawdown):</span>
+              <strong id="lab-mc-p5" style="font-family: var(--font-mono); color: var(--ledger-loss);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Monte Carlo P50 (Median Outcome):</span>
+              <strong id="lab-mc-p50" style="font-family: var(--font-mono); color: var(--ink-primary);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.4rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Risk of Catastrophic Drawdown (&gt;15%):</span>
+              <strong id="lab-mc-ruin" style="font-family: var(--font-mono);">--%</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Regime & Friction Breakdown Section -->
+      <div style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;">
+        <!-- Regime Breakdown Table -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0;">Performance Across Market Regimes</h4>
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">REGIME AUDIT</span>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Examines whether the strategy relies exclusively on a single favorable market state or holds up across diverse conditions.
+          </p>
+
+          <table class="ledger-table" style="font-size: 0.8rem;">
+            <thead>
+              <tr>
+                <th>Regime</th>
+                <th>Bars</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Net PnL</th>
+                <th>Avg R</th>
+                <th>Resilience</th>
+              </tr>
+            </thead>
+            <tbody id="lab-regime-tbody">
+              <tr><td colspan="7" style="text-align: center; color: var(--ink-muted);">Run backtest to populate market regime metrics.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Execution Friction Drag Audit & Stress Test -->
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0;">Friction Drag &amp; Stress Survival</h4>
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">REALISTIC EXECUTION</span>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.75rem;">
+            Backtests with frictionless fills deceive traders. This audit tracks every dollar lost to spread, commissions, and gap slippage.
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.82rem;">
+            <div style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Gross Frictionless PnL:</span>
+              <strong id="lab-fric-gross" style="font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Commissions Paid:</span>
+              <strong id="lab-fric-comm" style="font-family: var(--font-mono); color: var(--ledger-loss);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Spread Crossing Cost:</span>
+              <strong id="lab-fric-spread" style="font-family: var(--font-mono); color: var(--ledger-loss);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Slippage &amp; Gap Slippage:</span>
+              <strong id="lab-fric-slippage" style="font-family: var(--font-mono); color: var(--ledger-loss);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm); border-top: 1px solid var(--ledger-paper-border);">
+              <span>Net Realized PnL:</span>
+              <strong id="lab-fric-net" style="font-family: var(--font-mono);">--</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; background: var(--ledger-paper-subtle); border-radius: var(--radius-sm);">
+              <span>Total Friction Drag:</span>
+              <strong id="lab-fric-drag" style="font-family: var(--font-mono); color: var(--ledger-loss);">--%</strong>
+            </div>
+          </div>
+
+          <div id="lab-stress-result-box" style="margin-top: 0.75rem; padding: 0.6rem; background: var(--ledger-paper-base); border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong style="font-size: 0.8rem; font-family: var(--font-serif);">2x Friction Liquidity Stress Test:</strong>
+              <span id="lab-stress-badge" class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">NOT RUN</span>
+            </div>
+            <div id="lab-stress-details" style="font-size: 0.75rem; color: var(--ink-secondary); margin-top: 0.25rem;">
+              Click "2x Friction Stress Test" to test performance under doubled spread and slippage.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Execution Fill Audit Log -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <div>
+            <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0;">Realistic Order Fill Log</h4>
+            <span style="font-size: 0.8rem; color: var(--ink-muted);">Audit individual bar entries, partition tags, gap slippage, and exit reasons.</span>
+          </div>
+          <span id="lab-fill-count-badge" class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">0 FILLS</span>
+        </div>
+
+        <div style="overflow-x: auto; max-height: 380px;">
+          <table class="ledger-table" style="font-size: 0.78rem;">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Partition</th>
+                <th>Direction</th>
+                <th>Regime</th>
+                <th>Entry Bar</th>
+                <th>Exit Bar</th>
+                <th>Entry Price</th>
+                <th>Exit Price</th>
+                <th>Exit Reason</th>
+                <th>Slippage</th>
+                <th>Realized R</th>
+                <th>Net PnL</th>
+              </tr>
+            </thead>
+            <tbody id="lab-fills-tbody">
+              <tr><td colspan="12" style="text-align: center; color: var(--ink-muted);">Execute backtest to review trade fill log.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

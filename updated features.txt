@@ -1,0 +1,13 @@
+Separate sample, simulated, imported, and personal trades. Label every record’s source and make sample data impossible to confuse with a trader’s results. Show clear mode banners and exclude sample trades from performance reports by default. Otherwise, the dashboard can give people confidence in numbers that aren’t theirs.
+
+Build a strategy research lab before adding signals. Let users write precise setup rules, then test them on historical data with commissions, spread, slippage, and realistic fills. Separate development data from out-of-sample results, and report uncertainty, drawdown, losing streaks, and performance by market conditions. A winning backtest alone is not evidence of a durable edge.
+
+Make risk checks instrument-aware. Position size should account for the actual symbol, contract or lot specification, stop distance, and estimated costs. Keep daily loss and trade limits as hard guardrails, with a clear explanation when the app says “pass.” Incorrect sizing can make an otherwise careful workflow dangerous.
+
+Measure execution quality separately from P&L. Track whether traders followed their written entry, stop, target, and exit rules. Compare compliant and non-compliant trades over time, but don’t imply that following rules necessarily produces profits.
+
+Make reviews specific to the trader’s own history. Instead of generic advice, surface observations such as “your last 20 trades in this session had higher average costs” or “you often exited before your planned target.” Show the sample size and uncertainty, and phrase these as observations, not predictions.
+
+Add a deliberate review-and-pause workflow. Encourage recording the plan before entry, documenting missed setups and rule violations afterward, and stopping when personal limits are reached. The aim is to reduce impulsive decisions, not pressure users to trade more.
+
+Treat broker connectivity as a later, carefully controlled step. Start with read-only account imports or demo-only integration. Clearly distinguish broker orders from journal entries; never make users think “demo practice” placed an order when it only created a record.
