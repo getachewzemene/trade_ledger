@@ -82,6 +82,16 @@ import {
   documentRuleViolationRecord,
   evaluateSessionLimitsAndPause
 } from '../src/engine/deliberate-pause.js';
+import {
+  ALLOWED_IMAGE_TYPES,
+  SCREENSHOT_TAGS,
+  validateImageAttachment,
+  createVisualEvidenceRecord,
+  linkScreenshotsToTrade,
+  calculateVisualEvidenceMetrics,
+  compareVisualAccountabilityCohorts,
+  generateVisualJournalObservations
+} from '../src/engine/visual-journal.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -1536,6 +1546,116 @@ console.log('\n--- Suite 21: Deliberate Review-and-Pause & Pre-Entry Commitment 
   // 7. Anti-Pressure and Reflection Prompts
   assert(cleanEval.reflectionPrompts.length >= 3, 'Reflection prompts provided to cultivate deliberate pause');
   assert(cleanEval.antiPressurePhilosophy.includes('zero gamification'), 'Anti-pressure philosophy explicit in session status');
+}
+
+console.log('\n--- Suite 22: Visual Trade Journal, Screenshot Ingestion & Dual Lightbox Engine ---');
+{
+  // 1. Allowed Image Types & Tag Definitions
+  assert(ALLOWED_IMAGE_TYPES.includes('image/png'), 'PNG image type is allowed');
+  assert(ALLOWED_IMAGE_TYPES.includes('image/jpeg'), 'JPEG image type is allowed');
+  assert(ALLOWED_IMAGE_TYPES.includes('image/webp'), 'WEBP image type is allowed');
+  assert(SCREENSHOT_TAGS.PRE_ENTRY !== undefined, 'PRE_ENTRY screenshot tag defined');
+  assert(SCREENSHOT_TAGS.OUTCOME !== undefined, 'OUTCOME screenshot tag defined');
+  assert(SCREENSHOT_TAGS.MISSED !== undefined, 'MISSED screenshot tag defined');
+
+  // 2. Image Attachment Validation
+  const emptyImg = validateImageAttachment({});
+  assertEquals(emptyImg.valid, false, 'Empty attachment fails validation');
+  assert(emptyImg.errors[0].includes('MIME type is required'), 'MIME type required error reported');
+
+  const unsupportedImg = validateImageAttachment({ mimeType: 'application/pdf', sizeBytes: 5000 });
+  assertEquals(unsupportedImg.valid, false, 'PDF is rejected as screenshot');
+  assert(unsupportedImg.errors[0].includes('Unsupported image type'), 'Explains allowed formats');
+
+  const oversizeImg = validateImageAttachment({ mimeType: 'image/png', sizeBytes: 15 * 1024 * 1024 });
+  assertEquals(oversizeImg.valid, false, 'Oversized image (>10MB) is rejected');
+  assert(oversizeImg.errors[0].includes('exceeds maximum allowed limit'), 'Reports 10MB limit error');
+
+  const validImg = validateImageAttachment({ mimeType: 'image/png', sizeBytes: 1024 * 1024, tag: 'PRE_ENTRY' });
+  assertEquals(validImg.valid, true, 'Valid 1MB PNG image passes validation');
+
+  // 3. Creating Visual Evidence Record
+  const createdRecordResult = createVisualEvidenceRecord({
+    mimeType: 'image/png',
+    sizeBytes: 45000,
+    tag: 'PRE_ENTRY',
+    url: '/data/screenshots/shot_test_1.png',
+    caption: '15m Bearish Order Block and Liquidity Sweep',
+    entityType: 'TRADE',
+    entityId: 'TR-1001'
+  });
+  assertEquals(createdRecordResult.valid, true, 'Visual evidence record created successfully');
+  assert(createdRecordResult.record.id.startsWith('IMG-'), 'Visual record receives IMG- ID');
+  assertEquals(createdRecordResult.record.tag, 'PRE_ENTRY', 'Assigned PRE_ENTRY tag');
+  assertEquals(createdRecordResult.record.tagLabel, 'Pre-Entry Setup (Before)', 'Assigned human-readable tag label');
+  assertEquals(createdRecordResult.record.url, '/data/screenshots/shot_test_1.png', 'Stored accessible URL');
+
+  // 4. Linking Screenshots to Trade
+  const baseTrade = {
+    id: 'TR-1002',
+    symbol: 'ES',
+    direction: 'LONG',
+    entryPrice: 5000,
+    stopLoss: 4980
+  };
+  const preEntryShot = { tag: 'PRE_ENTRY', url: '/data/screenshots/shot_before.png' };
+  const outcomeShot = { tag: 'OUTCOME', url: '/data/screenshots/shot_after.png' };
+
+  const linkedTradeSingle = linkScreenshotsToTrade(baseTrade, [preEntryShot]);
+  assertEquals(linkedTradeSingle.hasPreEntryScreenshot, true, 'Flags hasPreEntryScreenshot: true');
+  assertEquals(linkedTradeSingle.hasOutcomeScreenshot, false, 'Flags hasOutcomeScreenshot: false');
+  assertEquals(linkedTradeSingle.hasVisualEvidence, true, 'Flags hasVisualEvidence: true');
+  assertEquals(linkedTradeSingle.preEntryScreenshotUrl, '/data/screenshots/shot_before.png', 'Sets preEntryScreenshotUrl');
+
+  const linkedTradeDual = linkScreenshotsToTrade(baseTrade, [preEntryShot, outcomeShot]);
+  assertEquals(linkedTradeDual.hasPreEntryScreenshot, true, 'Dual hasPreEntryScreenshot: true');
+  assertEquals(linkedTradeDual.hasOutcomeScreenshot, true, 'Dual hasOutcomeScreenshot: true');
+  assertEquals(linkedTradeDual.hasVisualEvidence, true, 'Dual hasVisualEvidence: true');
+
+  // 5. Visual Evidence Metrics Calculation
+  const testTrades = [
+    { id: 'T1', source: 'PERSONAL', hasVisualEvidence: true, hasPreEntryScreenshot: true, hasOutcomeScreenshot: true, isFullyCompliant: true, rMultiple: 2.0, netPnL: 200 },
+    { id: 'T2', source: 'PERSONAL', hasVisualEvidence: true, hasPreEntryScreenshot: true, hasOutcomeScreenshot: false, isFullyCompliant: true, rMultiple: -1.0, netPnL: -100 },
+    { id: 'T3', source: 'PERSONAL', hasVisualEvidence: false, isFullyCompliant: false, rMultiple: -2.0, netPnL: -200 },
+    { id: 'T4', source: 'PERSONAL', hasVisualEvidence: false, isFullyCompliant: false, rMultiple: 1.0, netPnL: 100 },
+    { id: 'T5', source: 'PERSONAL', hasVisualEvidence: true, hasPreEntryScreenshot: true, hasOutcomeScreenshot: true, isFullyCompliant: true, rMultiple: 3.0, netPnL: 300 },
+    { id: 'T-SAMPLE', source: 'SAMPLE', hasVisualEvidence: true, hasPreEntryScreenshot: true, hasOutcomeScreenshot: true } // should be ignored
+  ];
+
+  const metrics = calculateVisualEvidenceMetrics(testTrades, [{ screenshotUrl: '/test.png' }], [{ screenshotUrl: '/missed.png' }]);
+  assertEquals(metrics.totalTrades, 5, 'Excludes sample trades from total trade count (5 personal trades)');
+  assertEquals(metrics.tradesWithVisuals, 3, '3 trades with visual chart attachments');
+  assertEquals(metrics.visualCoveragePercent, 60.0, '60.0% visual coverage (3/5)');
+  assertEquals(metrics.tradesWithBeforeAndAfter, 2, '2 trades with dual Before & After split');
+  assertEquals(metrics.beforeAndAfterPercent, 40.0, '40.0% dual chart coverage (2/5)');
+  assert(metrics.visualCoverageCI.formatted !== undefined, 'Calculates Wilson 95% CI on visual coverage');
+  assertEquals(metrics.plansWithVisuals, 1, 'Counts 1 plan with visuals');
+  assertEquals(metrics.missedWithVisuals, 1, 'Counts 1 missed setup with visuals');
+
+  // 6. Visual Accountability Cohort Comparison
+  const cohorts = compareVisualAccountabilityCohorts(testTrades);
+  assertEquals(cohorts.totalTrades, 5, 'Evaluates 5 personal trades');
+  assertEquals(cohorts.documentedCohort.count, 3, 'Documented cohort has 3 trades');
+  assertEquals(cohorts.undocumentedCohort.count, 2, 'Undocumented cohort has 2 trades');
+  assertEquals(cohorts.documentedCohort.complianceRate, 100.0, 'Documented trades had 100% process compliance (3/3)');
+  assertEquals(cohorts.undocumentedCohort.complianceRate, 0.0, 'Undocumented trades had 0% process compliance (0/2)');
+  assertEquals(cohorts.complianceDelta, 100.0, 'Compliance delta = +100%');
+  assertEquals(cohorts.isPrediction, false, 'Accountability comparison flagged as NOT a prediction');
+  assert(cohorts.disclaimer.includes('does not guarantee future trading profits'), 'Includes clear epistemological disclaimer');
+
+  // 7. Visual Journal Observations Generation
+  const observations = generateVisualJournalObservations(testTrades);
+  assert(observations.length >= 2, 'Generates empirical visual observations');
+  const coverageObs = observations.find(o => o.id === 'visual-coverage-rate');
+  assert(coverageObs !== undefined, 'Surfaces visual coverage observation');
+  assertEquals(coverageObs.sampleSize, 5, 'Sample size n = 5');
+  assertEquals(coverageObs.eventCount, 3, 'Event count k = 3');
+  assertEquals(coverageObs.percentage, 60.0, 'Percentage = 60.0%');
+  assertEquals(coverageObs.isPrediction, false, 'Observation marked isPrediction: false');
+
+  const beforeAfterObs = observations.find(o => o.id === 'before-after-coverage');
+  assert(beforeAfterObs !== undefined, 'Surfaces dual Before/After coverage observation');
+  assertEquals(beforeAfterObs.eventCount, 2, 'Dual chart count = 2');
 }
 
 console.log('\n================================================================');

@@ -53,6 +53,16 @@ import {
   evaluateSessionLimitsAndPause,
   DELIBERATE_PAUSE_PRINCIPLES
 } from './src/engine/deliberate-pause.js';
+import {
+  ALLOWED_IMAGE_TYPES,
+  SCREENSHOT_TAGS,
+  validateImageAttachment,
+  createVisualEvidenceRecord,
+  linkScreenshotsToTrade,
+  calculateVisualEvidenceMetrics,
+  compareVisualAccountabilityCohorts,
+  generateVisualJournalObservations
+} from './src/engine/visual-journal.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,6 +162,16 @@ const persistPreEntryPlans = () => writeJsonFile('planned-trades.json', preEntry
 const persistMissedSetups = () => writeJsonFile('missed-setups.json', missedSetups);
 const persistDocumentedViolations = () => writeJsonFile('documented-violations.json', documentedViolations);
 
+// Load visual trade journal screenshots
+const SCREENSHOTS_DIR = path.join(DATA_DIR, 'screenshots');
+try {
+  fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+} catch (err) {
+  console.warn('Could not initialize screenshots dir:', err.message);
+}
+let screenshotsMetadata = readJsonFile('screenshots.json', []);
+const persistScreenshots = () => writeJsonFile('screenshots.json', screenshotsMetadata);
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -159,6 +179,10 @@ const MIME_TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
   '.ico': 'image/x-icon'
 };
 
@@ -280,6 +304,14 @@ const server = http.createServer((req, res) => {
             persistPreEntryPlans();
           }
         }
+
+        if (payload.preEntryScreenshotUrl) safeTrade.preEntryScreenshotUrl = payload.preEntryScreenshotUrl;
+        if (payload.outcomeScreenshotUrl) safeTrade.outcomeScreenshotUrl = payload.outcomeScreenshotUrl;
+        if (payload.screenshotUrl) safeTrade.screenshotUrl = payload.screenshotUrl;
+        if (Array.isArray(payload.screenshots)) safeTrade.screenshots = payload.screenshots;
+        safeTrade.hasPreEntryScreenshot = Boolean(safeTrade.preEntryScreenshotUrl);
+        safeTrade.hasOutcomeScreenshot = Boolean(safeTrade.outcomeScreenshotUrl);
+        safeTrade.hasVisualEvidence = Boolean(safeTrade.hasPreEntryScreenshot || safeTrade.hasOutcomeScreenshot || safeTrade.screenshotUrl || (safeTrade.screenshots && safeTrade.screenshots.length > 0));
 
         safeTrade.executionQuality = evaluateExecutionQuality(safeTrade);
         safeTrade.processOutcome = classifyProcessOutcome(safeTrade);
@@ -453,6 +485,139 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: err.message }));
       }
     });
+    return;
+  }
+
+  // GET /api/screenshots
+  if (pathname === '/api/screenshots' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ screenshots: screenshotsMetadata }));
+    return;
+  }
+
+  // POST /api/screenshots/upload
+  if (pathname === '/api/screenshots/upload' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 15 * 1024 * 1024) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Payload exceeds 15 MB limit' }));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        let base64Data = String(payload.base64Data || '');
+        let mimeType = String(payload.mimeType || 'image/png');
+        
+        if (base64Data.startsWith('data:')) {
+          const match = base64Data.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            mimeType = match[1];
+            base64Data = match[2];
+          }
+        }
+
+        const buffer = Buffer.from(base64Data, 'base64');
+        const validation = validateImageAttachment({
+          mimeType,
+          sizeBytes: buffer.length,
+          tag: payload.tag
+        });
+
+        if (!validation.valid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid image attachment', details: validation.errors }));
+          return;
+        }
+
+        const extMap = {
+          'image/png': 'png',
+          'image/jpeg': 'jpg',
+          'image/jpg': 'jpg',
+          'image/webp': 'webp',
+          'image/svg+xml': 'svg',
+          'image/gif': 'gif'
+        };
+        const ext = extMap[mimeType] || 'png';
+        const fileName = `shot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const filePath = path.join(SCREENSHOTS_DIR, fileName);
+
+        fs.writeFileSync(filePath, buffer);
+        const imageUrl = `/data/screenshots/${fileName}`;
+
+        const { record } = createVisualEvidenceRecord({
+          entityType: payload.entityType || 'TRADE',
+          entityId: payload.entityId || null,
+          tag: payload.tag || 'PRE_ENTRY',
+          url: imageUrl,
+          caption: payload.caption || '',
+          mimeType,
+          sizeBytes: buffer.length,
+          timeframe: payload.timeframe || ''
+        });
+
+        screenshotsMetadata.unshift(record);
+        persistScreenshots();
+
+        // Automatically link to entity if provided
+        if (payload.entityId) {
+          const entityType = String(payload.entityType || 'TRADE').toUpperCase();
+          if (entityType === 'TRADE') {
+            const trade = activeTrades.find(t => t.id === payload.entityId);
+            if (trade) {
+              trade.screenshots = trade.screenshots || [];
+              trade.screenshots.push(record);
+              if (record.tag === 'PRE_ENTRY') {
+                trade.preEntryScreenshotUrl = record.url;
+                trade.hasPreEntryScreenshot = true;
+              } else if (record.tag === 'OUTCOME') {
+                trade.outcomeScreenshotUrl = record.url;
+                trade.hasOutcomeScreenshot = true;
+              }
+              trade.hasVisualEvidence = true;
+              persistTrades();
+            }
+          } else if (entityType === 'PLAN') {
+            const plan = preEntryPlans.find(p => p.id === payload.entityId);
+            if (plan) {
+              plan.screenshots = plan.screenshots || [];
+              plan.screenshots.push(record);
+              plan.screenshotUrl = record.url;
+              persistPreEntryPlans();
+            }
+          } else if (entityType === 'MISSED') {
+            const missed = missedSetups.find(m => m.id === payload.entityId);
+            if (missed) {
+              missed.screenshots = missed.screenshots || [];
+              missed.screenshots.push(record);
+              missed.screenshotUrl = record.url;
+              persistMissedSetups();
+            }
+          }
+        }
+
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Screenshot uploaded successfully', screenshot: record }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // GET /api/visual-journal/metrics
+  if (pathname === '/api/visual-journal/metrics' && req.method === 'GET') {
+    const perfTrades = getPerformanceTrades();
+    const metrics = calculateVisualEvidenceMetrics(perfTrades, preEntryPlans, missedSetups);
+    const cohorts = compareVisualAccountabilityCohorts(perfTrades);
+    const observations = generateVisualJournalObservations(perfTrades);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ metrics, cohorts, observations, screenshots: screenshotsMetadata }));
     return;
   }
 

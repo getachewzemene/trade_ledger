@@ -23,6 +23,12 @@ import {
   MISSED_SETUP_REASONS,
   DELIBERATE_PAUSE_PRINCIPLES
 } from '../engine/deliberate-pause.js';
+import {
+  calculateVisualEvidenceMetrics,
+  compareVisualAccountabilityCohorts,
+  generateVisualJournalObservations,
+  SCREENSHOT_TAGS
+} from '../engine/visual-journal.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics, LEAK_DEFINITIONS } from '../engine/leak-detector.js';
 import { buildTradeSummaryReport } from '../engine/reporting.js';
 import { importTradesFromCSV } from '../engine/csv-parser.js';
@@ -88,6 +94,12 @@ let preEntryPlans = [];
 let missedSetups = [];
 let activePreEntryPlanId = null;
 let annotatingTrade = null;
+let activeTradeDropzoneSlot = 'before';
+let currentLightboxData = {
+  primaryUrl: null,
+  secondaryUrl: null,
+  currentMode: 'split'
+};
 let currentTool = 'line';
 let isDrawing = false;
 let startX = 0;
@@ -414,6 +426,7 @@ async function initApp() {
   setupPreSession();
   setupContract();
   setupAnnotator();
+  setupVisualScreenshotIngestion();
   setupPropFirm();
   setupPlaybook();
   setupTradingPlan();
@@ -638,7 +651,10 @@ function renderTradeTable() {
         <td>${stampBadge}</td>
         <td><span class="trade-source-badge ${sourceBadgeClass}">${sourceLabel}</span></td>
         <td style="font-size: 0.75rem; color: var(--ink-secondary);">${isSample ? '<span class="rubber-stamp stamp-neutral">EXAMPLE</span> ' : (t.executionMode === 'DEMO' || isSimulated ? '<span class="rubber-stamp stamp-neutral">DEMO</span> ' : '')}${(t.setupId || 'Discretionary').replaceAll('_', ' ')}</td>
-        <td>
+        <td style="white-space: nowrap;">
+          ${(t.hasVisualEvidence || t.screenshotUrl || t.preEntryScreenshotUrl || t.outcomeScreenshotUrl) ? `
+            <button class="btn btn-primary btn-sm" style="padding: 2px 6px; font-size: 0.72rem; margin-right: 4px;" onclick="window.openTradeVisual('${t.id}')" title="View Chart Evidence">📷 Chart</button>
+          ` : ''}
           <button class="btn btn-secondary btn-sm" onclick="window.openAnnotator('${t.id}')">Markup</button>
         </td>
       </tr>
@@ -1099,17 +1115,100 @@ function setupDebriefWizard() {
 }
 
 /**
- * 9. Render Visual Trade Gallery
+ * 9. Render Visual Trade Gallery & Evidence Filmstrip
  */
 function renderGallery() {
   const galleryGrid = document.getElementById('gallery-grid');
   if (!galleryGrid) return;
 
   const filterSetup = document.getElementById('gallery-filter-setup')?.value || 'ALL';
-  const filtered = getVisibleJournalTrades().filter(t => filterSetup === 'ALL' || t.setupId === filterSetup);
+  const filterEvidence = document.getElementById('gallery-filter-evidence')?.value || 'ALL';
+
+  // Update Visual Accountability & Evidence HUD
+  const perfTrades = getPerformanceTrades();
+  const vMetrics = calculateVisualEvidenceMetrics(perfTrades, preEntryPlans, missedSetups);
+  const vCohorts = compareVisualAccountabilityCohorts(perfTrades);
+
+  const statTradesCount = document.getElementById('visual-stat-trades-count');
+  if (statTradesCount) statTradesCount.textContent = `${vMetrics.tradesWithVisuals} / ${vMetrics.totalTrades}`;
+
+  const statCoverageCi = document.getElementById('visual-stat-coverage-ci');
+  if (statCoverageCi) statCoverageCi.textContent = `95% CI: ${vMetrics.visualCoverageCI?.formatted || '--'}`;
+
+  const statDualCount = document.getElementById('visual-stat-dual-count');
+  if (statDualCount) statDualCount.textContent = `${vMetrics.tradesWithBeforeAndAfter} (${vMetrics.beforeAndAfterPercent.toFixed(1)}%)`;
+
+  const statDocComp = document.getElementById('visual-stat-doc-compliance');
+  if (statDocComp) statDocComp.textContent = `${vCohorts.documentedCohort.complianceRate.toFixed(1)}%`;
+
+  const statUndocComp = document.getElementById('visual-stat-undoc-compliance');
+  if (statUndocComp) statUndocComp.textContent = `${vCohorts.undocumentedCohort.complianceRate.toFixed(1)}%`;
+
+  const hudBadge = document.getElementById('visual-hud-coverage-badge');
+  if (hudBadge) {
+    hudBadge.textContent = `EVIDENCE COVERAGE: ${vMetrics.visualCoveragePercent.toFixed(0)}%`;
+    hudBadge.className = vMetrics.visualCoveragePercent >= 70 ? 'rubber-stamp stamp-clean' : (vMetrics.visualCoveragePercent >= 40 ? 'rubber-stamp stamp-warn' : 'rubber-stamp stamp-danger');
+  }
+
+  // Handle Missed Setups Evidence View
+  if (filterEvidence === 'MISSED_SETUPS') {
+    const missedList = missedSetups.filter(m => filterSetup === 'ALL' || m.setupId === filterSetup);
+    if (missedList.length === 0) {
+      galleryGrid.innerHTML = `<div class="card full" style="text-align: center; color: var(--ink-muted); padding: 3rem;">No passed setup charts logged yet.</div>`;
+      return;
+    }
+
+    galleryGrid.innerHTML = missedList.map(m => {
+      const hasPic = Boolean(m.screenshotUrl);
+      return `
+        <div class="gallery-card">
+          <div class="gallery-preview-box" style="position: relative; height: 180px; overflow: hidden; background: #12151A; display: flex; align-items: center; justify-content: center; cursor: pointer;"
+               onclick="${hasPic ? `window.openLightbox('${m.screenshotUrl}', '${m.symbol} Passed Setup', '${m.reasonLabel}', null, '${m.reflection || ''}')` : ''}">
+            ${hasPic ? `
+              <span class="rubber-stamp stamp-clean" style="position: absolute; top: 6px; left: 6px; font-size: 0.6rem; z-index: 2; background: rgba(0,0,0,0.7); color: #FFF;">PASSED OPPORTUNITY</span>
+              <img src="${m.screenshotUrl}" alt="Passed Setup" style="width: 100%; height: 100%; object-fit: cover;">
+            ` : `
+              <div style="text-align: center; color: var(--ink-muted); padding: 1rem;">
+                <span style="font-size: 2rem; display: block; margin-bottom: 0.25rem;">🛡️</span>
+                <span style="font-size: 0.85rem; font-family: var(--font-serif); color: var(--ink-secondary);">No Chart Attached</span>
+                <div style="font-size: 0.72rem; margin-top: 0.25rem;">Discipline win recorded ($0 cost)</div>
+              </div>
+            `}
+          </div>
+          <div style="padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <strong style="font-family: var(--font-serif); font-size: 1.15rem;">${m.symbol}</strong>
+              <span class="rubber-stamp ${m.isDisciplineWin ? 'stamp-clean' : 'stamp-neutral'}">${m.isDisciplineWin ? 'DISCIPLINE WIN' : 'PASSED'}</span>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--ink-secondary); margin-bottom: 0.5rem;">
+              ${m.reasonLabel}
+            </div>
+            ${m.reflection ? `<div style="font-size: 0.76rem; color: var(--ink-muted); margin-bottom: 0.5rem; font-style: italic;">"${m.reflection}"</div>` : ''}
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--ink-muted);">
+              <span>${new Date(m.date || m.createdAt).toLocaleDateString()}</span>
+              ${hasPic ? `<button class="btn btn-primary btn-sm" onclick="window.openLightbox('${m.screenshotUrl}', '${m.symbol}', '${m.reasonLabel}', null, '${m.reflection || ''}')">View High-Res</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    return;
+  }
+
+  // Filter Trades
+  const filtered = getVisibleJournalTrades().filter(t => {
+    if (filterSetup !== 'ALL' && t.setupId !== filterSetup) return false;
+    const hasBefore = Boolean(t.hasPreEntryScreenshot || t.preEntryScreenshotUrl || (t.screenshots && t.screenshots.some(s => s.tag === 'PRE_ENTRY')));
+    const hasAfter = Boolean(t.hasOutcomeScreenshot || t.outcomeScreenshotUrl || t.screenshotUrl || (t.screenshots && t.screenshots.some(s => s.tag === 'OUTCOME')));
+    const hasAny = hasBefore || hasAfter || Boolean(t.hasVisualEvidence);
+
+    if (filterEvidence === 'HAS_SCREENSHOT' && !hasAny) return false;
+    if (filterEvidence === 'DUAL_BEFORE_AFTER' && !(hasBefore && hasAfter)) return false;
+    return true;
+  });
 
   if (filtered.length === 0) {
-    galleryGrid.innerHTML = `<div class="card full" style="text-align: center; color: var(--ink-muted); padding: 3rem;">No trade charts matching selected setup.</div>`;
+    galleryGrid.innerHTML = `<div class="card full" style="text-align: center; color: var(--ink-muted); padding: 3rem;">No trade charts matching selected filters.</div>`;
     return;
   }
 
@@ -1119,14 +1218,54 @@ function renderGallery() {
     const sourceLabel = getTradeSourceLabel(t);
     const sourceBadgeClass = getTradeSourceBadgeClass(t);
     const rFormatted = (t.rMultiple >= 0 ? '+' : '') + Number(t.rMultiple || 0).toFixed(2) + 'R';
-    const chartSvg = renderTradeChartSVG(t);
     const grade = t.disciplineGrade || (isGain ? 'A' : 'C');
+
+    const beforeUrl = t.preEntryScreenshotUrl || (t.screenshots && t.screenshots.find(s => s.tag === 'PRE_ENTRY')?.url) || null;
+    const afterUrl = t.outcomeScreenshotUrl || (t.screenshots && t.screenshots.find(s => s.tag === 'OUTCOME')?.url) || t.screenshotUrl || null;
+    const hasDual = Boolean(beforeUrl && afterUrl);
+    const singleUrl = afterUrl || beforeUrl;
+
+    let previewContent = '';
+    if (hasDual) {
+      previewContent = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px; height: 180px; width: 100%; position: relative; cursor: pointer;"
+             onclick="window.openLightbox('${afterUrl}', '${t.symbol} (${t.direction}) [${t.id}]', 'Planned vs. Outcome Dual Split', '${beforeUrl}', '${t.notes || ''}')"
+             title="Click to open Before/After Dual Split View">
+          <div style="position: relative; height: 100%; overflow: hidden; background: #12151A;">
+            <span class="rubber-stamp stamp-neutral" style="position: absolute; top: 4px; left: 4px; font-size: 0.55rem; background: rgba(0,0,0,0.75); color: #FFF; z-index: 2;">BEFORE</span>
+            <img src="${beforeUrl}" alt="Before Plan" style="width: 100%; height: 100%; object-fit: cover;">
+          </div>
+          <div style="position: relative; height: 100%; overflow: hidden; background: #12151A;">
+            <span class="rubber-stamp stamp-neutral" style="position: absolute; top: 4px; left: 4px; font-size: 0.55rem; background: rgba(0,0,0,0.75); color: #FFF; z-index: 2;">AFTER</span>
+            <img src="${afterUrl}" alt="After Outcome" style="width: 100%; height: 100%; object-fit: cover;">
+          </div>
+          <span class="rubber-stamp stamp-clean" style="position: absolute; bottom: 6px; right: 6px; font-size: 0.55rem; background: rgba(255,255,255,0.9); z-index: 3;">DUAL PROOF ✓</span>
+        </div>
+      `;
+    } else if (singleUrl) {
+      previewContent = `
+        <div style="position: relative; height: 180px; width: 100%; overflow: hidden; background: #12151A; cursor: pointer;"
+             onclick="window.openLightbox('${singleUrl}', '${t.symbol} (${t.direction}) [${t.id}]', '${(t.setupId || '').replace('_', ' ')} • ${rFormatted}', null, '${t.notes || ''}')"
+             title="Click to view chart screenshot">
+          <span class="rubber-stamp stamp-neutral" style="position: absolute; top: 6px; left: 6px; font-size: 0.6rem; background: rgba(0,0,0,0.75); color: #FFF; z-index: 2;">
+            ${beforeUrl ? 'BEFORE (PLAN)' : 'CHART PROOF'}
+          </span>
+          <img src="${singleUrl}" alt="Chart Evidence" style="width: 100%; height: 100%; object-fit: cover;">
+        </div>
+      `;
+    } else {
+      previewContent = `
+        <div style="position: relative;">
+          ${renderTradeChartSVG(t)}
+        </div>
+      `;
+    }
 
     return `
       <div class="gallery-card ${isSample ? 'card-sample-trade' : ''}">
         ${isSample ? '<div class="card-sample-notice">SAMPLE EXAMPLE · NOT YOUR TRADING RESULTS</div>' : ''}
         <div class="gallery-preview-box">
-          ${chartSvg}
+          ${previewContent}
         </div>
         <div style="padding: 1rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
@@ -1144,9 +1283,14 @@ function renderGallery() {
             <span>MAE: -${Number(t.maePrice ? Math.abs((t.entryPrice - t.maePrice) / (t.entryPrice - t.stopLoss || 1)) : 0).toFixed(2)}R</span>
           </div>
 
-          <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
             <span style="font-size: 0.75rem; color: var(--ink-muted);">${new Date(t.entryDate).toLocaleDateString()}</span>
-            <button class="btn btn-secondary btn-sm" onclick="window.openAnnotator('${t.id}')">Markup Chart</button>
+            <div style="display: flex; gap: 0.35rem;">
+              ${(singleUrl) ? `
+                <button class="btn btn-primary btn-sm" onclick="window.openTradeVisual('${t.id}')" title="Open Lightbox">📷 Chart</button>
+              ` : ''}
+              <button class="btn btn-secondary btn-sm" onclick="window.openAnnotator('${t.id}')">Markup</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1241,6 +1385,403 @@ function initCanvas() {
   canvas.onmouseup = () => {
     isDrawing = false;
   };
+}
+
+/**
+ * 10b. Visual Journal Lightbox & Screenshot Upload Engine
+ */
+window.openTradeVisual = (tradeId) => {
+  const trade = trades.find(t => t.id === tradeId);
+  if (!trade) return;
+  const beforeUrl = trade.preEntryScreenshotUrl || (trade.screenshots && trade.screenshots.find(s => s.tag === 'PRE_ENTRY')?.url) || null;
+  const afterUrl = trade.outcomeScreenshotUrl || (trade.screenshots && trade.screenshots.find(s => s.tag === 'OUTCOME')?.url) || trade.screenshotUrl || null;
+  const primary = afterUrl || beforeUrl;
+  const secondary = (afterUrl && beforeUrl) ? beforeUrl : null;
+  const rFormatted = (trade.rMultiple >= 0 ? '+' : '') + Number(trade.rMultiple || 0).toFixed(2) + 'R';
+
+  window.openLightbox(
+    primary,
+    `${trade.symbol} (${trade.direction}) — ${trade.id}`,
+    `Setup: ${(trade.setupId || 'Discretionary').replace('_', ' ')} | PnL: $${trade.netPnL || 0} (${rFormatted})`,
+    secondary,
+    trade.notes || trade.planThesis || ''
+  );
+};
+
+window.openLightbox = (primaryUrl, title, subtitle, secondaryUrl = null, notes = '') => {
+  const modal = document.getElementById('lightbox-modal');
+  if (!modal) return;
+
+  currentLightboxData = {
+    primaryUrl,
+    secondaryUrl,
+    currentMode: secondaryUrl ? 'split' : 'single'
+  };
+
+  const titleEl = document.getElementById('lightbox-title');
+  if (titleEl) titleEl.textContent = title || 'Chart Evidence';
+  const subEl = document.getElementById('lightbox-subtitle');
+  if (subEl) subEl.textContent = subtitle || '';
+  const notesEl = document.getElementById('lightbox-notes');
+  if (notesEl) notesEl.textContent = notes ? `Notes / Reflection: ${notes}` : '';
+
+  const toggleBox = document.getElementById('lightbox-view-toggle');
+  const singleView = document.getElementById('lightbox-single-view');
+  const splitView = document.getElementById('lightbox-split-view');
+  const primaryImg = document.getElementById('lightbox-primary-img');
+  const beforeImg = document.getElementById('lightbox-split-before-img');
+  const afterImg = document.getElementById('lightbox-split-after-img');
+
+  if (secondaryUrl) {
+    if (toggleBox) toggleBox.style.display = 'flex';
+    if (beforeImg) beforeImg.src = secondaryUrl;
+    if (afterImg) afterImg.src = primaryUrl;
+    if (singleView) singleView.style.display = 'none';
+    if (splitView) splitView.style.display = 'grid';
+    const badge = document.getElementById('lightbox-badge');
+    if (badge) badge.textContent = 'DUAL SPLIT';
+  } else {
+    if (toggleBox) toggleBox.style.display = 'none';
+    if (primaryImg) primaryImg.src = primaryUrl;
+    if (singleView) singleView.style.display = 'flex';
+    if (splitView) splitView.style.display = 'none';
+    const badge = document.getElementById('lightbox-badge');
+    if (badge) badge.textContent = 'CHART PROOF';
+  }
+
+  modal.classList.add('open');
+};
+
+function setupLightbox() {
+  const modal = document.getElementById('lightbox-modal');
+  if (!modal) return;
+
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('btn-close-lightbox')?.addEventListener('click', closeModal);
+  document.getElementById('btn-lightbox-close-bottom')?.addEventListener('click', closeModal);
+
+  document.getElementById('btn-lightbox-mode-before')?.addEventListener('click', () => {
+    const singleView = document.getElementById('lightbox-single-view');
+    const splitView = document.getElementById('lightbox-split-view');
+    if (singleView) singleView.style.display = 'flex';
+    if (splitView) splitView.style.display = 'none';
+    const pImg = document.getElementById('lightbox-primary-img');
+    if (pImg) pImg.src = currentLightboxData.secondaryUrl || currentLightboxData.primaryUrl;
+    const badge = document.getElementById('lightbox-badge');
+    if (badge) badge.textContent = 'BEFORE (PLAN)';
+  });
+
+  document.getElementById('btn-lightbox-mode-after')?.addEventListener('click', () => {
+    const singleView = document.getElementById('lightbox-single-view');
+    const splitView = document.getElementById('lightbox-split-view');
+    if (singleView) singleView.style.display = 'flex';
+    if (splitView) splitView.style.display = 'none';
+    const pImg = document.getElementById('lightbox-primary-img');
+    if (pImg) pImg.src = currentLightboxData.primaryUrl;
+    const badge = document.getElementById('lightbox-badge');
+    if (badge) badge.textContent = 'AFTER (OUTCOME)';
+  });
+
+  document.getElementById('btn-lightbox-mode-split')?.addEventListener('click', () => {
+    const singleView = document.getElementById('lightbox-single-view');
+    const splitView = document.getElementById('lightbox-split-view');
+    if (singleView) singleView.style.display = 'none';
+    if (splitView) splitView.style.display = 'grid';
+    const badge = document.getElementById('lightbox-badge');
+    if (badge) badge.textContent = 'DUAL SPLIT';
+  });
+
+  document.getElementById('btn-lightbox-download')?.addEventListener('click', () => {
+    const singleVisible = document.getElementById('lightbox-single-view')?.style.display === 'flex';
+    const src = singleVisible
+      ? document.getElementById('lightbox-primary-img')?.src
+      : (currentLightboxData.primaryUrl || currentLightboxData.secondaryUrl);
+    if (!src) return;
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = `chart-evidence-${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+}
+
+async function uploadScreenshotFile(file, tag = 'GENERAL', entityType = null, entityId = null) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64Data = reader.result;
+      try {
+        const res = await fetch('/api/screenshots/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base64Data,
+            mimeType: file.type || 'image/png',
+            tag,
+            entityType,
+            entityId,
+            timeframe: ''
+          })
+        });
+        const data = await res.json();
+        if (data.screenshot?.url) {
+          resolve(data.screenshot.url);
+        } else {
+          resolve(base64Data);
+        }
+      } catch (err) {
+        console.warn('Screenshot upload API error, using data URL fallback:', err);
+        resolve(base64Data);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function setupVisualScreenshotIngestion() {
+  setupLightbox();
+
+  const bindDropzone = ({ dropzoneId, fileInputId, promptId, previewBoxId, previewImgId, removeBtnId, hiddenInputId, tag, entityType, onSelect }) => {
+    const dropzone = document.getElementById(dropzoneId);
+    const fileInput = document.getElementById(fileInputId);
+    const promptEl = document.getElementById(promptId);
+    const previewBox = document.getElementById(previewBoxId);
+    const previewImg = document.getElementById(previewImgId);
+    const removeBtn = document.getElementById(removeBtnId);
+    const hiddenInput = document.getElementById(hiddenInputId);
+
+    if (!dropzone) return;
+
+    dropzone.addEventListener('click', (e) => {
+      if (e.target !== removeBtn && !removeBtn?.contains(e.target)) {
+        fileInput?.click();
+      }
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--ledger-profit)';
+      dropzone.style.background = '#F2F8F4';
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.style.borderColor = 'var(--ledger-paper-border)';
+      dropzone.style.background = '#FFF';
+    });
+
+    dropzone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--ledger-paper-border)';
+      dropzone.style.background = '#FFF';
+      const file = e.dataTransfer?.files?.[0];
+      if (file && file.type.startsWith('image/')) {
+        const url = await uploadScreenshotFile(file, tag, entityType);
+        if (hiddenInput) hiddenInput.value = url;
+        if (previewImg) previewImg.src = url;
+        if (previewBox) previewBox.style.display = 'block';
+        if (promptEl) promptEl.style.display = 'none';
+        if (onSelect) onSelect(url);
+      }
+    });
+
+    fileInput?.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        const url = await uploadScreenshotFile(file, tag, entityType);
+        if (hiddenInput) hiddenInput.value = url;
+        if (previewImg) previewImg.src = url;
+        if (previewBox) previewBox.style.display = 'block';
+        if (promptEl) promptEl.style.display = 'none';
+        if (onSelect) onSelect(url);
+      }
+    });
+
+    removeBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (hiddenInput) hiddenInput.value = '';
+      if (previewBox) previewBox.style.display = 'none';
+      if (promptEl) promptEl.style.display = 'block';
+      if (fileInput) fileInput.value = '';
+    });
+  };
+
+  // Bind Pre-Entry Modal Dropzone
+  bindDropzone({
+    dropzoneId: 'dropzone-plan-chart',
+    fileInputId: 'file-plan-chart',
+    promptId: 'dropzone-plan-prompt',
+    previewBoxId: 'preview-plan-box',
+    previewImgId: 'preview-plan-img',
+    removeBtnId: 'btn-remove-plan-img',
+    hiddenInputId: 'form-plan-screenshot-url',
+    tag: 'PRE_ENTRY',
+    entityType: 'PLAN'
+  });
+
+  // Bind Trade Modal Before Dropzone
+  bindDropzone({
+    dropzoneId: 'dropzone-trade-before',
+    fileInputId: 'file-trade-before',
+    promptId: 'dropzone-before-prompt',
+    previewBoxId: 'preview-before-box',
+    previewImgId: 'preview-before-img',
+    removeBtnId: 'btn-remove-before-img',
+    hiddenInputId: 'form-trade-preentry-screenshot',
+    tag: 'PRE_ENTRY',
+    entityType: 'TRADE',
+    onSelect: () => { activeTradeDropzoneSlot = 'after'; }
+  });
+
+  // Bind Trade Modal After Dropzone
+  bindDropzone({
+    dropzoneId: 'dropzone-trade-after',
+    fileInputId: 'file-trade-after',
+    promptId: 'dropzone-after-prompt',
+    previewBoxId: 'preview-after-box',
+    previewImgId: 'preview-after-img',
+    removeBtnId: 'btn-remove-after-img',
+    hiddenInputId: 'form-trade-outcome-screenshot',
+    tag: 'OUTCOME',
+    entityType: 'TRADE'
+  });
+
+  // Bind Missed Setup Dropzone
+  bindDropzone({
+    dropzoneId: 'dropzone-missed-chart',
+    fileInputId: 'file-missed-chart',
+    promptId: 'dropzone-missed-prompt',
+    previewBoxId: 'preview-missed-box',
+    previewImgId: 'preview-missed-img',
+    removeBtnId: 'btn-remove-missed-img',
+    hiddenInputId: 'form-missed-screenshot-url',
+    tag: 'MISSED',
+    entityType: 'MISSED'
+  });
+
+  document.getElementById('dropzone-trade-before')?.addEventListener('mouseenter', () => { activeTradeDropzoneSlot = 'before'; });
+  document.getElementById('dropzone-trade-after')?.addEventListener('mouseenter', () => { activeTradeDropzoneSlot = 'after'; });
+
+  // Paste Screenshot button in Gallery Header
+  document.getElementById('btn-gallery-paste-screenshot')?.addEventListener('click', async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
+          for (const type of item.types) {
+            if (type.startsWith('image/')) {
+              const blob = await item.getType(type);
+              const file = new File([blob], `clipboard-${Date.now()}.${type.split('/')[1] || 'png'}`, { type });
+              const url = await uploadScreenshotFile(file, 'GENERAL', 'TRADE');
+              alert('Chart screenshot uploaded from clipboard!');
+              renderGallery();
+              return;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard read error:', err);
+    }
+    alert('Press Ctrl + V anywhere to paste your chart screenshot directly.');
+  });
+
+  // Global Clipboard Paste (Ctrl + V) Handler
+  window.addEventListener('paste', async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    let imageItem = null;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        imageItem = items[i];
+        break;
+      }
+    }
+    if (!imageItem) return;
+
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+
+    const tradeModal = document.getElementById('trade-modal');
+    const preentryModal = document.getElementById('preentry-modal');
+    const missedModal = document.getElementById('missed-setup-modal');
+
+    // Case 1: Inside Trade Modal
+    if (tradeModal?.classList.contains('open')) {
+      const targetSlot = activeTradeDropzoneSlot || (document.getElementById('form-trade-preentry-screenshot')?.value ? 'after' : 'before');
+      if (targetSlot === 'before') {
+        const url = await uploadScreenshotFile(file, 'PRE_ENTRY', 'TRADE');
+        const inpHidden = document.getElementById('form-trade-preentry-screenshot');
+        if (inpHidden) inpHidden.value = url;
+        const prevImg = document.getElementById('preview-before-img');
+        if (prevImg) prevImg.src = url;
+        const prevBox = document.getElementById('preview-before-box');
+        if (prevBox) prevBox.style.display = 'block';
+        const promptEl = document.getElementById('dropzone-before-prompt');
+        if (promptEl) promptEl.style.display = 'none';
+        activeTradeDropzoneSlot = 'after';
+      } else {
+        const url = await uploadScreenshotFile(file, 'OUTCOME', 'TRADE');
+        const inpHidden = document.getElementById('form-trade-outcome-screenshot');
+        if (inpHidden) inpHidden.value = url;
+        const prevImg = document.getElementById('preview-after-img');
+        if (prevImg) prevImg.src = url;
+        const prevBox = document.getElementById('preview-after-box');
+        if (prevBox) prevBox.style.display = 'block';
+        const promptEl = document.getElementById('dropzone-after-prompt');
+        if (promptEl) promptEl.style.display = 'none';
+      }
+      return;
+    }
+
+    // Case 2: Inside Pre-Entry Modal
+    if (preentryModal?.classList.contains('open')) {
+      const url = await uploadScreenshotFile(file, 'PRE_ENTRY', 'PLAN');
+      const inpHidden = document.getElementById('form-plan-screenshot-url');
+      if (inpHidden) inpHidden.value = url;
+      const prevImg = document.getElementById('preview-plan-img');
+      if (prevImg) prevImg.src = url;
+      const prevBox = document.getElementById('preview-plan-box');
+      if (prevBox) prevBox.style.display = 'block';
+      const promptEl = document.getElementById('dropzone-plan-prompt');
+      if (promptEl) promptEl.style.display = 'none';
+      return;
+    }
+
+    // Case 3: Inside Missed Setup Modal
+    if (missedModal?.classList.contains('open')) {
+      const url = await uploadScreenshotFile(file, 'MISSED', 'MISSED');
+      const inpHidden = document.getElementById('form-missed-screenshot-url');
+      if (inpHidden) inpHidden.value = url;
+      const prevImg = document.getElementById('preview-missed-img');
+      if (prevImg) prevImg.src = url;
+      const prevBox = document.getElementById('preview-missed-box');
+      if (prevBox) prevBox.style.display = 'block';
+      const promptEl = document.getElementById('dropzone-missed-prompt');
+      if (promptEl) promptEl.style.display = 'none';
+      return;
+    }
+
+    // Case 4: No modal open — open Trade Modal and pre-load pasted screenshot
+    const url = await uploadScreenshotFile(file, 'OUTCOME', 'TRADE');
+    const openBtn = document.getElementById('btn-open-modal');
+    if (openBtn) {
+      openBtn.click();
+      setTimeout(() => {
+        const inpHidden = document.getElementById('form-trade-outcome-screenshot');
+        if (inpHidden) inpHidden.value = url;
+        const prevImg = document.getElementById('preview-after-img');
+        if (prevImg) prevImg.src = url;
+        const prevBox = document.getElementById('preview-after-box');
+        if (prevBox) prevBox.style.display = 'block';
+        const promptEl = document.getElementById('dropzone-after-prompt');
+        if (promptEl) promptEl.style.display = 'none';
+      }, 120);
+    }
+  });
 }
 
 /**
@@ -2136,6 +2677,12 @@ function setupModal() {
         preSessionCompleted: isPreSessionDone,
         notes,
         planId: activePreEntryPlanId || undefined,
+        preEntryScreenshotUrl: document.getElementById('form-trade-preentry-screenshot')?.value || null,
+        outcomeScreenshotUrl: document.getElementById('form-trade-outcome-screenshot')?.value || null,
+        screenshotUrl: document.getElementById('form-trade-outcome-screenshot')?.value || document.getElementById('form-trade-preentry-screenshot')?.value || null,
+        hasPreEntryScreenshot: Boolean(document.getElementById('form-trade-preentry-screenshot')?.value),
+        hasOutcomeScreenshot: Boolean(document.getElementById('form-trade-outcome-screenshot')?.value),
+        hasVisualEvidence: Boolean(document.getElementById('form-trade-preentry-screenshot')?.value || document.getElementById('form-trade-outcome-screenshot')?.value),
         source: (document.getElementById('form-trade-source')?.value === 'SIMULATED' || Boolean(demoPracticeSetupId)) ? TRADE_SOURCES.DEMO_PRACTICE : TRADE_SOURCES.MANUAL,
         executionMode: (document.getElementById('form-trade-source')?.value === 'SIMULATED' || Boolean(demoPracticeSetupId)) ? 'DEMO' : 'JOURNAL'
       };
@@ -2438,6 +2985,7 @@ function setupPreEntryCommitment() {
         plannedStopLoss: parseFloat(document.getElementById('form-plan-stop').value),
         plannedTakeProfit: parseFloat(document.getElementById('form-plan-target').value),
         thesis: document.getElementById('form-plan-thesis').value,
+        screenshotUrl: document.getElementById('form-plan-screenshot-url')?.value || null,
         mentalCheck: {
           isCalm: document.getElementById('plan-check-calm')?.checked ?? true,
           waitedForSetup: document.getElementById('plan-check-trigger')?.checked ?? true,
@@ -2463,6 +3011,12 @@ function setupPreEntryCommitment() {
 
       closeModal();
       form.reset();
+      const planShot = document.getElementById('form-plan-screenshot-url');
+      if (planShot) planShot.value = '';
+      const previewPlanBox = document.getElementById('preview-plan-box');
+      if (previewPlanBox) previewPlanBox.style.display = 'none';
+      const promptPlan = document.getElementById('dropzone-plan-prompt');
+      if (promptPlan) promptPlan.style.display = 'block';
       renderPendingPreEntryPlans();
     });
   }
@@ -2495,17 +3049,25 @@ function renderPendingPreEntryPlans() {
       <div style="display: grid; gap: 0.75rem;">
         ${pending.map(plan => `
           <div class="card" style="background: #FFF; border: 1px solid var(--ledger-paper-border); padding: 0.85rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
-            <div>
-              <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                <strong style="font-family: var(--font-mono); font-size: 1.05rem;">${plan.symbol}</strong>
-                <span class="rubber-stamp ${plan.direction === 'LONG' ? 'stamp-clean' : 'stamp-danger'}" style="font-size: 0.65rem;">${plan.direction}</span>
-                <span style="font-size: 0.8rem; color: var(--ink-muted);">${plan.setupId}</span>
-                <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">PLANNED R:R ${plan.plannedRR || '--'}:1</span>
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              ${plan.screenshotUrl ? `
+                <img src="${plan.screenshotUrl}" alt="Plan Chart" style="width: 56px; height: 42px; object-fit: cover; border-radius: var(--radius-sm); border: 1.5px solid var(--accent-brass); cursor: pointer;"
+                     onclick="window.openLightbox('${plan.screenshotUrl}', '${plan.symbol} (${plan.direction}) Plan', 'Pre-Entry Commitment Chart', null, '${plan.thesis || ''}')"
+                     title="Click to view full plan chart">
+              ` : ''}
+              <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                  <strong style="font-family: var(--font-mono); font-size: 1.05rem;">${plan.symbol}</strong>
+                  <span class="rubber-stamp ${plan.direction === 'LONG' ? 'stamp-clean' : 'stamp-danger'}" style="font-size: 0.65rem;">${plan.direction}</span>
+                  <span style="font-size: 0.8rem; color: var(--ink-muted);">${plan.setupId}</span>
+                  <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">PLANNED R:R ${plan.plannedRR || '--'}:1</span>
+                  ${plan.screenshotUrl ? '<span class="rubber-stamp stamp-clean" style="font-size: 0.6rem;">CHART ATTACHED 📷</span>' : ''}
+                </div>
+                <div style="font-family: var(--font-mono); font-size: 0.82rem; color: var(--ink-secondary);">
+                  Entry: <strong>${plan.plannedEntryPrice}</strong> | Invalidation Stop: <strong style="color: var(--ledger-loss);">${plan.plannedStopLoss}</strong> | Target: <strong style="color: var(--ledger-profit);">${plan.plannedTakeProfit}</strong> | Risk: <strong>$${plan.plannedRiskDollars}</strong>
+                </div>
+                ${plan.thesis ? `<div style="font-size: 0.76rem; color: var(--ink-muted); margin-top: 0.25rem;"><em>Thesis: ${plan.thesis}</em></div>` : ''}
               </div>
-              <div style="font-family: var(--font-mono); font-size: 0.82rem; color: var(--ink-secondary);">
-                Entry: <strong>${plan.plannedEntryPrice}</strong> | Invalidation Stop: <strong style="color: var(--ledger-loss);">${plan.plannedStopLoss}</strong> | Target: <strong style="color: var(--ledger-profit);">${plan.plannedTakeProfit}</strong> | Risk: <strong>$${plan.plannedRiskDollars}</strong>
-              </div>
-              ${plan.thesis ? `<div style="font-size: 0.76rem; color: var(--ink-muted); margin-top: 0.25rem;"><em>Thesis: ${plan.thesis}</em></div>` : ''}
             </div>
             <div style="display: flex; gap: 0.5rem;">
               <button class="btn btn-primary btn-sm btn-execute-plan" data-plan-id="${plan.id}" title="Convert pre-planned intent to active execution">🚀 Confirm Trigger &amp; Log</button>
@@ -2535,6 +3097,17 @@ function renderPendingPreEntryPlans() {
         document.getElementById('form-take-profit').value = plan.plannedTakeProfit;
         document.getElementById('form-planned-risk').value = plan.plannedRiskDollars;
         if (plan.thesis) document.getElementById('form-notes').value = `[Pre-Planned Setup]: ${plan.thesis}`;
+
+        if (plan.screenshotUrl) {
+          const beforeInput = document.getElementById('form-trade-preentry-screenshot');
+          if (beforeInput) beforeInput.value = plan.screenshotUrl;
+          const prevBeforeImg = document.getElementById('preview-before-img');
+          if (prevBeforeImg) prevBeforeImg.src = plan.screenshotUrl;
+          const prevBeforeBox = document.getElementById('preview-before-box');
+          if (prevBeforeBox) prevBeforeBox.style.display = 'block';
+          const promptBefore = document.getElementById('dropzone-before-prompt');
+          if (promptBefore) promptBefore.style.display = 'none';
+        }
 
         tradeModal.classList.add('open');
       }

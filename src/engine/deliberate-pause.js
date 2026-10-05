@@ -158,6 +158,8 @@ export function createPreEntryPlan(rawPlan = {}) {
       acceptsRisk: Boolean(rawPlan.mentalCheck?.acceptsRisk ?? true)
     },
     preCommitmentConfirmed: Boolean(rawPlan.preCommitmentConfirmed ?? true),
+    screenshotUrl: rawPlan.screenshotUrl || rawPlan.preEntryScreenshotUrl || null,
+    screenshots: Array.isArray(rawPlan.screenshots) ? rawPlan.screenshots : [],
     status: 'PENDING', // PENDING, EXECUTED, CANCELLED
     createdAt: rawPlan.createdAt || new Date().toISOString()
   };
@@ -182,7 +184,10 @@ export function linkPlanToExecutedTrade(plan, trade) {
     plannedEntryPrice: plannedEntry,
     entrySlippage,
     planThesis: plan.thesis,
-    confluenceFactors: plan.confluenceFactors
+    confluenceFactors: plan.confluenceFactors,
+    preEntryScreenshotUrl: plan.screenshotUrl || trade.preEntryScreenshotUrl || null,
+    hasPreEntryScreenshot: Boolean(plan.screenshotUrl || trade.preEntryScreenshotUrl),
+    hasVisualEvidence: Boolean(plan.screenshotUrl || trade.preEntryScreenshotUrl || trade.screenshotUrl || trade.outcomeScreenshotUrl)
   };
 }
 
@@ -205,6 +210,8 @@ export function createMissedSetup(rawMissed = {}) {
     isDisciplineWin: reasonDef.isDisciplineWin,
     hypotheticalR: Number(rawMissed.hypotheticalR) || 0,
     reflection: String(rawMissed.reflection || '').trim(),
+    screenshotUrl: rawMissed.screenshotUrl || null,
+    screenshots: Array.isArray(rawMissed.screenshots) ? rawMissed.screenshots : [],
     createdAt: new Date().toISOString()
   };
 
