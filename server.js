@@ -78,6 +78,16 @@ import {
   parseBrokerOrderText,
   SUPPORTED_BROKERS
 } from './src/engine/broker-parser.js';
+import {
+  MARKET_REGIMES as EOD_MARKET_REGIMES,
+  NEWS_CATALYSTS,
+  EMOTIONAL_STATES,
+  RULE_ADHERENCE_VERDICTS,
+  synthesizeDailyTradingSummary,
+  evaluateEODReview,
+  generateExportableDailyReport,
+  validateEODReviewPayload
+} from './src/engine/eod-journal.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -186,6 +196,10 @@ try {
 }
 let screenshotsMetadata = readJsonFile('screenshots.json', []);
 const persistScreenshots = () => writeJsonFile('screenshots.json', screenshotsMetadata);
+
+// Load structured end-of-day reviews
+let eodReviews = readJsonFile('eod-reviews.json', []);
+const persistEodReviews = () => writeJsonFile('eod-reviews.json', eodReviews);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -1016,6 +1030,99 @@ const server = http.createServer((req, res) => {
           },
           backtest: backtestResult,
           stressTest: stressResult
+        }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // --- Structured End-of-Day (EOD) Review & Daily Archive Endpoints ---
+
+  // GET /api/eod-reviews
+  if (pathname === '/api/eod-reviews' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ reviews: eodReviews }));
+    return;
+  }
+
+  // GET /api/eod-reviews/:dateKey
+  if (pathname.startsWith('/api/eod-reviews/') && req.method === 'GET') {
+    const dateKey = pathname.replace('/api/eod-reviews/', '').trim();
+    const review = eodReviews.find(r => r.dateKey === dateKey);
+    const summary = synthesizeDailyTradingSummary(dateKey, activeTrades, preEntryPlans, missedSetups);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      found: !!review,
+      review: review || null,
+      summary,
+      report: review ? generateExportableDailyReport(review, summary) : null
+    }));
+    return;
+  }
+
+  // POST /api/eod-reviews/synthesize
+  if (pathname === '/api/eod-reviews/synthesize' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const dateKey = payload.dateKey || new Date().toISOString().slice(0, 10);
+        const summary = synthesizeDailyTradingSummary(dateKey, activeTrades, preEntryPlans, missedSetups);
+        const existingReview = eodReviews.find(r => r.dateKey === dateKey);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          dateKey,
+          summary,
+          existingReview: existingReview || null
+        }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/eod-reviews
+  if (pathname === '/api/eod-reviews' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const rawPayload = JSON.parse(body || '{}');
+        const validation = validateEODReviewPayload(rawPayload);
+        if (!validation.valid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: validation.errors.join('; ') }));
+          return;
+        }
+
+        const dateKey = rawPayload.dateKey;
+        const summary = synthesizeDailyTradingSummary(dateKey, activeTrades, preEntryPlans, missedSetups);
+        const evaluated = evaluateEODReview(rawPayload, summary);
+
+        // Upsert into eodReviews array
+        const existingIdx = eodReviews.findIndex(r => r.dateKey === dateKey);
+        if (existingIdx >= 0) {
+          eodReviews[existingIdx] = evaluated;
+        } else {
+          eodReviews.unshift(evaluated);
+        }
+        persistEodReviews();
+
+        const report = generateExportableDailyReport(evaluated, summary);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          review: evaluated,
+          summary,
+          report
         }));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });

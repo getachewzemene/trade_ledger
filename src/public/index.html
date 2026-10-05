@@ -48,6 +48,7 @@
       <button id="btn-open-missed-modal" class="btn btn-secondary" title="Document missed setups and celebrate restraint">🎯 Missed Setup</button>
       <button id="btn-tilt-status" class="rubber-stamp stamp-clean" style="cursor: pointer; display: none;" title="Active Cooldown Shield">COOLDOWN SHIELD 🛡️</button>
       <button id="btn-open-quick-ingest" class="btn btn-secondary" title="Paste raw fills from Tradovate, IBKR, MT4/5, TOS, or TradingView">⚡ Quick Ingest</button>
+      <button id="btn-open-eod-review" class="btn btn-secondary" title="Complete End-of-Day Review & Daily Journal Archive">📜 EOD Review</button>
       <button id="btn-open-modal" class="btn btn-primary">+ Log Trade</button>
       <button id="btn-open-report" class="btn btn-secondary">Quick Report</button>
       <button id="btn-save-backup" class="btn btn-secondary">Save Backup</button>
@@ -2582,6 +2583,15 @@
         <!-- Populated via JS -->
       </div>
 
+      <!-- 4. End-of-Day Review & Journal Seal Section -->
+      <div class="day-audit-section-title">
+        <span>End-of-Day Review &amp; Journal Seal</span>
+        <span id="day-audit-eod-status-badge" class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">AWAITING REVIEW</span>
+      </div>
+      <div id="day-audit-eod-container" style="background: #FFF; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); padding: 0.75rem 1rem; margin-bottom: 1.25rem;">
+        <!-- Populated via JS -->
+      </div>
+
       <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
         <button id="btn-close-day-audit-bottom" class="btn btn-secondary">Close Audit</button>
       </div>
@@ -2701,6 +2711,205 @@ Examples:
           🔒 Ledger &amp; Wick provenance engine: Imported broker executions are strictly tagged as VERIFIED BROKER IMPORT.
         </span>
         <button id="btn-quick-ingest-cancel" class="btn btn-secondary btn-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Structured End-of-Day (EOD) Review & Daily Journal Archive Modal -->
+  <div id="eod-review-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 1020px; width: 95vw; max-height: 94vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="margin-bottom: 0.75rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">DAILY ARCHIVE</span>
+            <h2 style="margin: 0; font-size: 1.3rem;">Structured End-of-Day Review &amp; Journal Seal</h2>
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); margin-top: 0.2rem;">
+            Synthesize daily execution data, document market regimes &amp; catalysts, score process discipline, and seal the daily archival record.
+          </div>
+        </div>
+        <button id="btn-close-eod-review" class="close-btn">&times;</button>
+      </div>
+
+      <div style="flex: 1; overflow-y: auto; padding-right: 0.35rem;">
+        <!-- Card 1: Date & Daily Synthesis -->
+        <div class="eod-section-card">
+          <div class="eod-section-title">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <span>1. Trading Date &amp; Automated Execution Synthesis</span>
+              <input type="date" id="eod-date-input" class="form-control" style="width: auto; padding: 0.2rem 0.5rem; font-size: 0.8rem; font-family: var(--font-mono);">
+              <button id="btn-eod-refresh-stats" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;" title="Re-synthesize ledger records for this date">↻ Sync Ledger</button>
+            </div>
+            <span id="eod-synthesis-status-badge" class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">NO TRADES</span>
+          </div>
+
+          <div id="eod-synthesis-metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; margin-top: 0.5rem;">
+            <!-- Populated via JS -->
+          </div>
+
+          <div id="eod-synthesis-obs-box" style="margin-top: 0.65rem; padding: 0.5rem 0.75rem; background: var(--ledger-paper-subtle); border: 1px dashed var(--ledger-paper-border); border-radius: var(--radius-sm); font-size: 0.78rem; color: var(--ink-secondary);">
+            <!-- Observations populated via JS -->
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;" id="eod-two-col-stage">
+          <!-- Column A: Market Conditions & Emotional Scorecard -->
+          <div>
+            <!-- Card 2: Market Conditions & Macro Catalysts -->
+            <div class="eod-section-card" style="margin-bottom: 0.75rem;">
+              <div class="eod-section-title">
+                <span>2. Market Conditions &amp; Macro Regimes</span>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0.6rem;">
+                <label style="font-size: 0.75rem; font-weight: 600;">Dominant Market Regime</label>
+                <select id="eod-market-regime" class="form-control" style="font-size: 0.8rem;">
+                  <option value="TRENDING_BULL">Trending Bullish (Clean Higher Highs / Higher Lows)</option>
+                  <option value="TRENDING_BEAR">Trending Bearish (Clean Lower Highs / Lower Lows)</option>
+                  <option value="CONSOLIDATION_RANGE" selected>Consolidation / Balanced Range (Mean-Reverting)</option>
+                  <option value="HIGH_VOLATILITY_CHOP">High Volatility / Erratic Chop (Whipsaws &amp; Wide Spreads)</option>
+                  <option value="LOW_LIQUIDITY_DRIFT">Low Liquidity / Summer &amp; Holiday Drift</option>
+                </select>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0.6rem;">
+                <label style="font-size: 0.75rem; font-weight: 600;">News Catalysts / Events (Select all that apply)</label>
+                <div class="eod-catalyst-grid" id="eod-catalyst-chips">
+                  <div class="eod-catalyst-chip" data-catalyst="FOMC_RATE_DECISION">FOMC Rate Decision</div>
+                  <div class="eod-catalyst-chip" data-catalyst="CPI_INFLATION">CPI / PPI Inflation</div>
+                  <div class="eod-catalyst-chip" data-catalyst="NFP_JOBS">NFP / Jobs Report</div>
+                  <div class="eod-catalyst-chip" data-catalyst="EARNINGS_ANNOUNCEMENT">Key Earnings</div>
+                  <div class="eod-catalyst-chip" data-catalyst="CENTRAL_BANK_SPEECH">CB Chair Speech</div>
+                  <div class="eod-catalyst-chip" data-catalyst="GEOPOLITICAL_BREAKING">Geopolitical News</div>
+                  <div class="eod-catalyst-chip selected" data-catalyst="NONE_TECHNICAL_ONLY">None (Clean Technicals)</div>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 0.75rem; font-weight: 600;">Higher Timeframe Context Notes</label>
+                <input type="text" id="eod-market-context-notes" class="form-control" placeholder="e.g. Daily key support held, 4H liquidity sweep in London..." style="font-size: 0.8rem;">
+              </div>
+            </div>
+
+            <!-- Card 3: Discipline & Emotional Debrief -->
+            <div class="eod-section-card">
+              <div class="eod-section-title">
+                <span>3. Discipline Rubric &amp; Emotional State</span>
+                <span id="eod-live-discipline-badge" class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">100% DISCIPLINE</span>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label style="font-size: 0.75rem; font-weight: 600;">Emotional Temperature</label>
+                  <select id="eod-emotional-state" class="form-control" style="font-size: 0.8rem;">
+                    <option value="CALM_CENTERED" selected>🧘 Calm &amp; Centered (Detached)</option>
+                    <option value="ALERT_FLOW">🎯 Alert &amp; Focused (Disciplined Flow)</option>
+                    <option value="MILD_ANXIETY_FOMO">⚡ Mild Anxiety / Resisted FOMO</option>
+                    <option value="FRUSTRATED_CHOP">😤 Frustrated by Price Action</option>
+                    <option value="TILT_REVENGE">🔥 Tilt / Anger / Broke Written Limits</option>
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label style="font-size: 0.75rem; font-weight: 600;">Energy &amp; Mental Clarity</label>
+                  <div class="eod-energy-stars" id="eod-energy-stars" title="Click to rate 1-5 stars">
+                    <span data-star="1">★</span>
+                    <span data-star="2">★</span>
+                    <span data-star="3">★</span>
+                    <span data-star="4">★</span>
+                    <span data-star="5">☆</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="eod-rubric-list" id="eod-rubric-list">
+                <label class="eod-rubric-row">
+                  <span class="eod-rubric-label">
+                    <input type="checkbox" id="eod-rubric-plan" checked>
+                    <span>Only traded setups defined in written plan</span>
+                  </span>
+                  <span class="eod-rubric-weight">+25%</span>
+                </label>
+                <label class="eod-rubric-row">
+                  <span class="eod-rubric-label">
+                    <input type="checkbox" id="eod-rubric-stops" checked>
+                    <span>Left stop loss untouched (never widened or removed)</span>
+                  </span>
+                  <span class="eod-rubric-weight">+25%</span>
+                </label>
+                <label class="eod-rubric-row">
+                  <span class="eod-rubric-label">
+                    <input type="checkbox" id="eod-rubric-limits" checked>
+                    <span>Stood down immediately when trade/loss cap was hit</span>
+                  </span>
+                  <span class="eod-rubric-weight">+20%</span>
+                </label>
+                <label class="eod-rubric-row">
+                  <span class="eod-rubric-label">
+                    <input type="checkbox" id="eod-rubric-fomo" checked>
+                    <span>Refrained from chasing runaway candles or boredom trades</span>
+                  </span>
+                  <span class="eod-rubric-weight">+15%</span>
+                </label>
+                <label class="eod-rubric-row">
+                  <span class="eod-rubric-label">
+                    <input type="checkbox" id="eod-rubric-risk" checked>
+                    <span>Accepted full risk prior to entry without outcome anxiety</span>
+                  </span>
+                  <span class="eod-rubric-weight">+15%</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Column B: Reflections & Exportable Report Preview -->
+          <div>
+            <!-- Card 4: Qualitative Reflections -->
+            <div class="eod-section-card" style="margin-bottom: 0.75rem;">
+              <div class="eod-section-title">
+                <span>4. Qualitative Reflections</span>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0.6rem;">
+                <label style="font-size: 0.75rem; font-weight: 600;">What did I execute well today?</label>
+                <textarea id="eod-well-done" class="form-control" rows="2" placeholder="e.g. Honored pre-entry stop on NQ; waited for 5m candle close..." style="font-size: 0.8rem;"></textarea>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0.6rem;">
+                <label style="font-size: 0.75rem; font-weight: 600;">Biggest impulse, friction, or lesson learned?</label>
+                <textarea id="eod-biggest-friction" class="form-control" rows="2" placeholder="e.g. Hesitated on ES pullback because of previous loss..." style="font-size: 0.8rem;"></textarea>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 0.75rem; font-weight: 600;">Single behavioral focus for tomorrow?</label>
+                <input type="text" id="eod-focus-tomorrow" class="form-control" placeholder="e.g. Stare at hands during 10:00 AM news candle; zero market orders." style="font-size: 0.8rem;">
+              </div>
+            </div>
+
+            <!-- Card 5: Exportable Archival Report Preview -->
+            <div class="eod-section-card">
+              <div class="eod-section-title">
+                <span>5. Archival Daily Report Card (Preview)</span>
+                <div style="display: flex; gap: 0.35rem;">
+                  <button id="btn-eod-copy-markdown" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.15rem 0.45rem;">📋 Copy Markdown</button>
+                  <button id="btn-eod-download-md" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.15rem 0.45rem;">💾 Download .md</button>
+                </div>
+              </div>
+
+              <pre id="eod-report-preview" class="eod-report-preview">Report preview will update automatically as you fill your review...</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 0.5rem; border-top: 1px solid var(--ledger-paper-border);">
+        <span style="font-size: 0.72rem; color: var(--ink-muted); font-style: italic;">
+          🔒 Ledger &amp; Wick: Past process fidelity reflections are empirical records, not predictions of future market distributions.
+        </span>
+        <div style="display: flex; gap: 0.5rem;">
+          <button id="btn-eod-cancel" class="btn btn-secondary btn-sm">Close</button>
+          <button id="btn-eod-save-seal" class="btn btn-primary btn-sm">✓ Seal &amp; Save Daily Journal</button>
+        </div>
       </div>
     </div>
   </div>

@@ -98,10 +98,20 @@ import {
   SUPPORTED_BROKERS,
   inferAssetClassFromSymbol
 } from '../engine/broker-parser.js';
+import {
+  MARKET_REGIMES as EOD_MARKET_REGIMES,
+  NEWS_CATALYSTS,
+  EMOTIONAL_STATES,
+  RULE_ADHERENCE_VERDICTS,
+  synthesizeDailyTradingSummary,
+  evaluateEODReview,
+  generateExportableDailyReport
+} from '../engine/eod-journal.js';
 
 // Application State
 let trades = [];
 let sampleTrades = [];
+let eodReviews = [];
 let activeLessonId = 'lesson-1';
 let curriculumData = [];
 let tradingContract = { ...DEFAULT_TRADING_CONTRACT };
@@ -170,6 +180,7 @@ function persistLocalBackup() {
     preSessionLogs,
     tradingPlan,
     planChecklist,
+    eodReviews,
     session: currentSession,
     savedAt: new Date().toISOString()
   };
@@ -192,6 +203,9 @@ function restoreLocalBackup() {
     if (!backup || !Array.isArray(backup.trades)) return null;
     if (backup.session && isSessionActive(backup.session)) {
       currentSession = backup.session;
+    }
+    if (Array.isArray(backup.eodReviews)) {
+      eodReviews = backup.eodReviews;
     }
     return backup;
   } catch (err) {
@@ -453,6 +467,7 @@ async function initApp() {
   setupSessionSystem();
   setupResearchLab();
   setupQuickIngestBox();
+  setupEODReview();
 
   const storedSession = loadSessionState(window.localStorage);
   if (storedSession && isSessionActive(storedSession)) {
@@ -470,14 +485,15 @@ async function initApp() {
 
   // Load Initial Data from REST API
   try {
-    const [tradesRes, currRes, contractRes, preRes, samplesRes, plansRes, missedRes] = await Promise.all([
+    const [tradesRes, currRes, contractRes, preRes, samplesRes, plansRes, missedRes, eodRes] = await Promise.all([
       fetch('/api/trades'),
       fetch('/api/curriculum'),
       fetch('/api/contract'),
       fetch('/api/presession'),
       fetch('/api/sample-trades'),
       fetch('/api/plans/pre-entry'),
-      fetch('/api/missed-setups')
+      fetch('/api/missed-setups'),
+      fetch('/api/eod-reviews').catch(() => null)
     ]);
     trades = await tradesRes.json();
     curriculumData = await currRes.json();
@@ -493,6 +509,12 @@ async function initApp() {
     if (missedRes && missedRes.ok) {
       const mData = await missedRes.json();
       missedSetups = mData.records || [];
+    }
+    if (eodRes && eodRes.ok) {
+      const eData = await eodRes.json();
+      if (Array.isArray(eData.reviews)) {
+        eodReviews = eData.reviews;
+      }
     }
 
     if (trades.length === 0 && localBackup) {
@@ -4844,6 +4866,81 @@ function openDayAuditModal(dateKey) {
     }
   }
 
+  // 6. End-of-Day Review & Journal Seal Section
+  const eodContainer = document.getElementById('day-audit-eod-container');
+  const eodBadge = document.getElementById('day-audit-eod-status-badge');
+  const existingReview = eodReviews.find(r => r.dateKey === dateKey);
+
+  if (eodBadge) {
+    if (existingReview) {
+      eodBadge.className = `rubber-stamp ${existingReview.stampClass || 'stamp-clean'}`;
+      eodBadge.textContent = existingReview.ruleAdherenceSeal || 'REVIEW COMPLETED ✓';
+    } else {
+      eodBadge.className = 'rubber-stamp stamp-neutral';
+      eodBadge.textContent = 'AWAITING REVIEW';
+    }
+  }
+
+  if (eodContainer) {
+    if (existingReview) {
+      const starIcons = '★'.repeat(existingReview.energyRating || 3) + '☆'.repeat(5 - (existingReview.energyRating || 3));
+      eodContainer.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <span class="rubber-stamp ${existingReview.stampClass || 'stamp-clean'}" style="font-size: 0.7rem;">${existingReview.ruleAdherenceSeal || 'DISCIPLINED EXECUTION'}</span>
+              <span style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: var(--ink-primary);">Discipline Score: ${existingReview.processDisciplineScore}%</span>
+              <span style="font-size: 0.75rem; color: #D4AF37;">${starIcons} (${existingReview.energyRating}/5)</span>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--ink-secondary); margin-top: 0.35rem;">
+              <strong>Regime:</strong> ${existingReview.marketRegimeLabel || existingReview.marketRegime} | <strong>Emotion:</strong> ${existingReview.emotionalStateIcon || '🧘'} ${existingReview.emotionalStateLabel || existingReview.emotionalState}
+            </div>
+            ${existingReview.reflections?.wellDone ? `<div style="font-size: 0.78rem; color: var(--ink-primary); margin-top: 0.3rem;"><strong>Well Done:</strong> "${existingReview.reflections.wellDone}"</div>` : ''}
+            ${existingReview.reflections?.biggestFriction ? `<div style="font-size: 0.78rem; color: var(--ledger-loss); margin-top: 0.2rem;"><strong>Friction:</strong> "${existingReview.reflections.biggestFriction}"</div>` : ''}
+            ${existingReview.reflections?.focusTomorrow ? `<div style="font-size: 0.78rem; color: var(--accent-brass); margin-top: 0.2rem;"><strong>Tomorrow's Focus:</strong> "${existingReview.reflections.focusTomorrow}"</div>` : ''}
+          </div>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button id="btn-day-audit-open-eod" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">📜 Edit EOD Review</button>
+            <button id="btn-day-audit-copy-eod-report" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">📋 Copy Report</button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('btn-day-audit-open-eod')?.addEventListener('click', () => {
+        modal.classList.remove('open');
+        openEODReviewModal(dateKey);
+      });
+
+      document.getElementById('btn-day-audit-copy-eod-report')?.addEventListener('click', () => {
+        const summary = synthesizeDailyTradingSummary(dateKey, activeTrades, preEntryPlans, missedSetups, { excludeSample });
+        const report = generateExportableDailyReport(existingReview, summary);
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(report).then(() => {
+            alert('✓ Copied archival report to clipboard!');
+          }).catch(() => {
+            prompt('Copy Report Markdown:', report);
+          });
+        } else {
+          prompt('Copy Report Markdown:', report);
+        }
+      });
+    } else {
+      eodContainer.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="font-size: 0.85rem; color: var(--ink-secondary);">
+            No End-of-Day Review logged yet for ${dateKey}. Complete your structured review to log market regimes, debrief emotional state, and seal your daily journal.
+          </div>
+          <button id="btn-day-audit-create-eod" class="btn btn-primary btn-sm" style="font-size: 0.75rem; padding: 0.25rem 0.75rem;">+ Complete EOD Review</button>
+        </div>
+      `;
+
+      document.getElementById('btn-day-audit-create-eod')?.addEventListener('click', () => {
+        modal.classList.remove('open');
+        openEODReviewModal(dateKey);
+      });
+    }
+  }
+
   modal.classList.add('open');
 }
 
@@ -5154,6 +5251,416 @@ function setupQuickIngestBox() {
     tradeModal.classList.add('open');
   };
 }
+
+/**
+ * 29. Structured End-of-Day (EOD) Review & Daily Journal Archive
+ */
+let currentEODDateKey = null;
+let currentEODSynthesis = null;
+let currentEODEnergyRating = 4;
+
+function openEODReviewModal(targetDateKey) {
+  const modal = document.getElementById('eod-review-modal');
+  if (!modal) return;
+
+  const dateInput = document.getElementById('eod-date-input');
+  const dateKey = targetDateKey || (dateInput?.value) || formatDateKey(new Date());
+  currentEODDateKey = dateKey;
+  if (dateInput) dateInput.value = dateKey;
+
+  // 1. Synthesize daily stats
+  const performanceTrades = getPerformanceTrades();
+  currentEODSynthesis = synthesizeDailyTradingSummary(dateKey, performanceTrades, preEntryPlans, missedSetups);
+
+  // 2. Render Card 1 Metrics Grid & Status
+  const statusBadge = document.getElementById('eod-synthesis-status-badge');
+  const metricsGrid = document.getElementById('eod-synthesis-metrics-grid');
+  const obsBox = document.getElementById('eod-synthesis-obs-box');
+
+  const p = currentEODSynthesis.performance;
+  const pnlColor = p.netPnL > 0 ? 'var(--ledger-profit)' : (p.netPnL < 0 ? 'var(--ledger-loss)' : 'var(--ink-muted)');
+
+  if (statusBadge) {
+    if (p.totalTrades > 0) {
+      if (p.netPnL > 0) {
+        statusBadge.className = 'rubber-stamp stamp-clean';
+        statusBadge.textContent = 'PROFITABLE DAY ✓';
+      } else if (p.netPnL < 0) {
+        statusBadge.className = 'rubber-stamp stamp-danger';
+        statusBadge.textContent = 'DRAWDOWN DAY';
+      } else {
+        statusBadge.className = 'rubber-stamp stamp-neutral';
+        statusBadge.textContent = 'BREAKEVEN DAY';
+      }
+    } else if (currentEODSynthesis.planning.missedCount > 0) {
+      statusBadge.className = 'rubber-stamp stamp-clean';
+      statusBadge.textContent = 'REST / DISCIPLINE WIN 🛡️';
+    } else {
+      statusBadge.className = 'rubber-stamp stamp-neutral';
+      statusBadge.textContent = 'NO TRADES';
+    }
+  }
+
+  if (metricsGrid) {
+    metricsGrid.innerHTML = `
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Trades / Fills</div>
+        <div style="font-family: var(--font-mono); font-weight: 700; font-size: 0.95rem;">${p.totalTrades} <span style="font-size: 0.72rem; font-weight: 400; color: var(--ink-secondary);">(${p.wins}W / ${p.losses}L)</span></div>
+      </div>
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Realized Net P&amp;L</div>
+        <div style="font-family: var(--font-mono); font-weight: 700; font-size: 0.95rem; color: ${pnlColor};">${p.netPnL >= 0 ? '+' : ''}$${p.netPnL.toFixed(2)}</div>
+      </div>
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Realized R</div>
+        <div style="font-family: var(--font-mono); font-weight: 700; font-size: 0.95rem;">${p.totalR >= 0 ? '+' : ''}${p.totalR.toFixed(2)}R</div>
+      </div>
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Friction / Fees</div>
+        <div style="font-family: var(--font-mono); font-size: 0.95rem; color: var(--ink-secondary);">$${p.totalCommissions.toFixed(2)}</div>
+      </div>
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Rule Compliance</div>
+        <div style="font-family: var(--font-mono); font-weight: 700; font-size: 0.95rem; color: ${p.violationsCount === 0 ? 'var(--ledger-profit)' : 'var(--ledger-loss)'};">${p.complianceRate.toFixed(1)}%</div>
+      </div>
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Pre-Entry Plans</div>
+        <div style="font-family: var(--font-mono); font-size: 0.95rem;">${currentEODSynthesis.planning.plansCount} Logged</div>
+      </div>
+      <div style="background: var(--ledger-paper-subtle); padding: 0.45rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--ledger-paper-border);">
+        <div style="font-size: 0.68rem; color: var(--ink-muted);">Deliberate Passes</div>
+        <div style="font-family: var(--font-mono); font-size: 0.95rem;">${currentEODSynthesis.planning.missedCount} (${currentEODSynthesis.planning.disciplineWins} Wins)</div>
+      </div>
+    `;
+  }
+
+  if (obsBox) {
+    if (currentEODSynthesis.observations.length > 0) {
+      obsBox.style.display = 'block';
+      obsBox.innerHTML = `<strong>Session Context Observations:</strong><ul style="margin: 0.25rem 0 0 1.25rem; padding: 0;">${currentEODSynthesis.observations.map(o => `<li><strong>${o.headline}:</strong> ${o.text}</li>`).join('')}</ul>`;
+    } else {
+      obsBox.style.display = 'none';
+      obsBox.innerHTML = '';
+    }
+  }
+
+  // 3. Check for existing review or load defaults
+  const existing = eodReviews.find(r => r.dateKey === dateKey);
+
+  const marketRegimeEl = document.getElementById('eod-market-regime');
+  const contextNotesEl = document.getElementById('eod-market-context-notes');
+  const emotionalStateEl = document.getElementById('eod-emotional-state');
+  const rubricPlanEl = document.getElementById('eod-rubric-plan');
+  const rubricStopsEl = document.getElementById('eod-rubric-stops');
+  const rubricLimitsEl = document.getElementById('eod-rubric-limits');
+  const rubricFomoEl = document.getElementById('eod-rubric-fomo');
+  const rubricRiskEl = document.getElementById('eod-rubric-risk');
+  const wellDoneEl = document.getElementById('eod-well-done');
+  const frictionEl = document.getElementById('eod-biggest-friction');
+  const tomorrowEl = document.getElementById('eod-focus-tomorrow');
+
+  if (existing) {
+    if (marketRegimeEl) marketRegimeEl.value = existing.marketRegime || 'CONSOLIDATION_RANGE';
+    if (contextNotesEl) contextNotesEl.value = existing.marketContextNotes || '';
+    if (emotionalStateEl) emotionalStateEl.value = existing.emotionalState || 'CALM_CENTERED';
+    setEnergyStarsRating(existing.energyRating || 4);
+
+    // Catalysts chips
+    const activeCats = Array.isArray(existing.catalysts) ? existing.catalysts : ['NONE_TECHNICAL_ONLY'];
+    document.querySelectorAll('#eod-catalyst-chips .eod-catalyst-chip').forEach(chip => {
+      const cat = chip.getAttribute('data-catalyst');
+      if (activeCats.includes(cat)) {
+        chip.classList.add('selected');
+      } else {
+        chip.classList.remove('selected');
+      }
+    });
+
+    // Rubric
+    if (rubricPlanEl) rubricPlanEl.checked = existing.rubric?.followedDailyPlan !== false;
+    if (rubricStopsEl) rubricStopsEl.checked = existing.rubric?.respectedStops !== false;
+    if (rubricLimitsEl) rubricLimitsEl.checked = existing.rubric?.respectedDailyLimits !== false;
+    if (rubricFomoEl) rubricFomoEl.checked = existing.rubric?.resistedImpulseFOMO !== false;
+    if (rubricRiskEl) rubricRiskEl.checked = existing.rubric?.acceptedRiskFully !== false;
+
+    // Reflections
+    if (wellDoneEl) wellDoneEl.value = existing.reflections?.wellDone || '';
+    if (frictionEl) frictionEl.value = existing.reflections?.biggestFriction || '';
+    if (tomorrowEl) tomorrowEl.value = existing.reflections?.focusTomorrow || '';
+  } else {
+    if (marketRegimeEl) marketRegimeEl.value = 'CONSOLIDATION_RANGE';
+    if (contextNotesEl) contextNotesEl.value = '';
+    if (emotionalStateEl) emotionalStateEl.value = 'CALM_CENTERED';
+    setEnergyStarsRating(4);
+
+    document.querySelectorAll('#eod-catalyst-chips .eod-catalyst-chip').forEach(chip => {
+      const cat = chip.getAttribute('data-catalyst');
+      if (cat === 'NONE_TECHNICAL_ONLY') {
+        chip.classList.add('selected');
+      } else {
+        chip.classList.remove('selected');
+      }
+    });
+
+    if (rubricPlanEl) rubricPlanEl.checked = true;
+    if (rubricStopsEl) rubricStopsEl.checked = true;
+    if (rubricLimitsEl) rubricLimitsEl.checked = true;
+    if (rubricFomoEl) rubricFomoEl.checked = true;
+    if (rubricRiskEl) rubricRiskEl.checked = true;
+
+    if (wellDoneEl) wellDoneEl.value = '';
+    if (frictionEl) frictionEl.value = '';
+    if (tomorrowEl) tomorrowEl.value = '';
+  }
+
+  updateLiveEODPreview();
+  modal.classList.add('open');
+}
+
+function setEnergyStarsRating(rating) {
+  currentEODEnergyRating = Math.max(1, Math.min(5, Number(rating) || 4));
+  const starsContainer = document.getElementById('eod-energy-stars');
+  if (!starsContainer) return;
+  starsContainer.querySelectorAll('span').forEach(span => {
+    const starIdx = parseInt(span.getAttribute('data-star'), 10);
+    span.textContent = starIdx <= currentEODEnergyRating ? '★' : '☆';
+  });
+}
+
+function updateLiveEODPreview() {
+  if (!currentEODSynthesis) return null;
+
+  const dateKey = currentEODDateKey || formatDateKey(new Date());
+  const marketRegime = document.getElementById('eod-market-regime')?.value || 'CONSOLIDATION_RANGE';
+  const contextNotes = document.getElementById('eod-market-context-notes')?.value || '';
+  const emotionalState = document.getElementById('eod-emotional-state')?.value || 'CALM_CENTERED';
+
+  const selectedCatalysts = [];
+  document.querySelectorAll('#eod-catalyst-chips .eod-catalyst-chip.selected').forEach(chip => {
+    const cat = chip.getAttribute('data-catalyst');
+    if (cat) selectedCatalysts.push(cat);
+  });
+  if (selectedCatalysts.length === 0) selectedCatalysts.push('NONE_TECHNICAL_ONLY');
+
+  const rubric = {
+    followedDailyPlan: document.getElementById('eod-rubric-plan')?.checked ?? true,
+    respectedStops: document.getElementById('eod-rubric-stops')?.checked ?? true,
+    respectedDailyLimits: document.getElementById('eod-rubric-limits')?.checked ?? true,
+    resistedImpulseFOMO: document.getElementById('eod-rubric-fomo')?.checked ?? true,
+    acceptedRiskFully: document.getElementById('eod-rubric-risk')?.checked ?? true
+  };
+
+  const rawReview = {
+    dateKey,
+    marketRegime,
+    catalysts: selectedCatalysts,
+    marketContextNotes: contextNotes,
+    emotionalState,
+    energyRating: currentEODEnergyRating,
+    rubric,
+    wellDone: document.getElementById('eod-well-done')?.value || '',
+    biggestFriction: document.getElementById('eod-biggest-friction')?.value || '',
+    focusTomorrow: document.getElementById('eod-focus-tomorrow')?.value || ''
+  };
+
+  const evaluated = evaluateEODReview(rawReview, currentEODSynthesis);
+
+  // Update live score badge
+  const liveBadge = document.getElementById('eod-live-discipline-badge');
+  if (liveBadge) {
+    liveBadge.className = `rubber-stamp ${evaluated.stampClass}`;
+    liveBadge.textContent = `${evaluated.processDisciplineScore}% ${evaluated.ruleAdherenceSeal}`;
+  }
+
+  // Update preview text
+  const previewEl = document.getElementById('eod-report-preview');
+  if (previewEl) {
+    const reportText = generateExportableDailyReport(evaluated, currentEODSynthesis);
+    previewEl.textContent = reportText;
+  }
+
+  return evaluated;
+}
+
+function setupEODReview() {
+  const modal = document.getElementById('eod-review-modal');
+  const openBtn = document.getElementById('btn-open-eod-review');
+  const closeBtn = document.getElementById('btn-close-eod-review');
+  const cancelBtn = document.getElementById('btn-eod-cancel');
+  const refreshBtn = document.getElementById('btn-eod-refresh-stats');
+  const dateInput = document.getElementById('eod-date-input');
+  const copyBtn = document.getElementById('btn-eod-copy-markdown');
+  const downloadBtn = document.getElementById('btn-eod-download-md');
+  const saveSealBtn = document.getElementById('btn-eod-save-seal');
+
+  if (!modal) return;
+
+  if (openBtn) {
+    openBtn.addEventListener('click', () => {
+      openEODReviewModal(formatDateKey(new Date()));
+    });
+  }
+
+  const closeModal = () => modal.classList.remove('open');
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  if (dateInput) {
+    dateInput.addEventListener('change', () => {
+      openEODReviewModal(dateInput.value);
+    });
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      openEODReviewModal(dateInput?.value || currentEODDateKey);
+    });
+  }
+
+  // Energy Stars click listener
+  const starsContainer = document.getElementById('eod-energy-stars');
+  if (starsContainer) {
+    starsContainer.querySelectorAll('span').forEach(span => {
+      span.addEventListener('click', () => {
+        const starIdx = parseInt(span.getAttribute('data-star'), 10);
+        setEnergyStarsRating(starIdx);
+        updateLiveEODPreview();
+      });
+    });
+  }
+
+  // Catalyst Chips toggle listener
+  const catalystContainer = document.getElementById('eod-catalyst-chips');
+  if (catalystContainer) {
+    catalystContainer.querySelectorAll('.eod-catalyst-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const cat = chip.getAttribute('data-catalyst');
+        if (cat === 'NONE_TECHNICAL_ONLY') {
+          catalystContainer.querySelectorAll('.eod-catalyst-chip').forEach(c => c.classList.remove('selected'));
+          chip.classList.add('selected');
+        } else {
+          catalystContainer.querySelector('[data-catalyst="NONE_TECHNICAL_ONLY"]')?.classList.remove('selected');
+          chip.classList.toggle('selected');
+          const anySelected = catalystContainer.querySelectorAll('.eod-catalyst-chip.selected').length > 0;
+          if (!anySelected) {
+            catalystContainer.querySelector('[data-catalyst="NONE_TECHNICAL_ONLY"]')?.classList.add('selected');
+          }
+        }
+        updateLiveEODPreview();
+      });
+    });
+  }
+
+  // Rubric & inputs change listeners
+  const inputIds = [
+    'eod-market-regime',
+    'eod-market-context-notes',
+    'eod-emotional-state',
+    'eod-rubric-plan',
+    'eod-rubric-stops',
+    'eod-rubric-limits',
+    'eod-rubric-fomo',
+    'eod-rubric-risk',
+    'eod-well-done',
+    'eod-biggest-friction',
+    'eod-focus-tomorrow'
+  ];
+
+  inputIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', updateLiveEODPreview);
+      el.addEventListener('change', updateLiveEODPreview);
+    }
+  });
+
+  // Copy Markdown Report Button
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const previewEl = document.getElementById('eod-report-preview');
+      const text = previewEl ? previewEl.textContent : '';
+      if (!text) return;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+          copyBtn.textContent = '✓ Copied!';
+          setTimeout(() => { copyBtn.textContent = '📋 Copy Markdown'; }, 1800);
+        }).catch(() => {
+          prompt('Copy Report Markdown:', text);
+        });
+      } else {
+        prompt('Copy Report Markdown:', text);
+      }
+    });
+  }
+
+  // Download Markdown Report Button
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', () => {
+      const previewEl = document.getElementById('eod-report-preview');
+      const text = previewEl ? previewEl.textContent : '';
+      if (!text) return;
+      const dateKey = currentEODDateKey || 'today';
+      const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ledger_wick_daily_archive_${dateKey}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  // Seal & Save Daily Journal
+  if (saveSealBtn) {
+    saveSealBtn.addEventListener('click', async () => {
+      const evaluated = updateLiveEODPreview();
+      if (!evaluated) return;
+
+      saveSealBtn.disabled = true;
+      saveSealBtn.textContent = 'Sealing Journal...';
+
+      try {
+        const res = await fetch('/api/eod-reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(evaluated)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.review) {
+            const idx = eodReviews.findIndex(r => r.dateKey === evaluated.dateKey);
+            if (idx >= 0) eodReviews[idx] = data.review;
+            else eodReviews.unshift(data.review);
+          }
+        } else {
+          // Local fallback
+          const idx = eodReviews.findIndex(r => r.dateKey === evaluated.dateKey);
+          if (idx >= 0) eodReviews[idx] = evaluated;
+          else eodReviews.unshift(evaluated);
+        }
+      } catch (err) {
+        console.warn('EOD Review API save failed, persisting locally:', err);
+        const idx = eodReviews.findIndex(r => r.dateKey === evaluated.dateKey);
+        if (idx >= 0) eodReviews[idx] = evaluated;
+        else eodReviews.unshift(evaluated);
+      }
+
+      persistLocalBackup();
+      saveSealBtn.disabled = false;
+      saveSealBtn.textContent = '✓ Seal & Save Daily Journal';
+      closeModal();
+      alert(`✓ Daily Journal for ${evaluated.dateKey} sealed with score: ${evaluated.processDisciplineScore}% (${evaluated.ruleAdherenceSeal})`);
+
+      if (document.getElementById('calendar-view')?.classList.contains('active')) {
+        renderCalendarView();
+      }
+    });
+  }
+}
+
 
 
 

@@ -115,6 +115,17 @@ import {
   pairExecutionsIntoTrades,
   parseBrokerOrderText
 } from '../src/engine/broker-parser.js';
+import {
+  MARKET_REGIMES as EOD_MARKET_REGIMES,
+  NEWS_CATALYSTS,
+  EMOTIONAL_STATES,
+  RULE_ADHERENCE_VERDICTS,
+  DISCIPLINE_RUBRIC_ITEMS,
+  synthesizeDailyTradingSummary,
+  evaluateEODReview,
+  generateExportableDailyReport,
+  validateEODReviewPayload
+} from '../src/engine/eod-journal.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -1966,6 +1977,190 @@ console.log('\n--- Suite 24: Rapid Broker Order Text Parser & Quick Ingest Engin
   const emptyResult = parseBrokerOrderText('');
   assertEquals(emptyResult.success, false, 'Empty text fails gracefully');
   assertEquals(emptyResult.trades.length, 0, '0 trades created');
+}
+
+// ================================================================
+// SUITE 25: Structured End-of-Day (EOD) Review & Daily Journal Archive
+// ================================================================
+{
+  console.log('\n--- Suite 25: Structured End-of-Day Review & Daily Journal Archive Engine ---');
+
+  // 1. Market Regimes & Catalysts Definitions
+  assert(EOD_MARKET_REGIMES.TRENDING_BULL, 'Defines TRENDING_BULL regime');
+  assert(EOD_MARKET_REGIMES.TRENDING_BEAR, 'Defines TRENDING_BEAR regime');
+  assert(EOD_MARKET_REGIMES.CONSOLIDATION_RANGE, 'Defines CONSOLIDATION_RANGE regime');
+  assert(EOD_MARKET_REGIMES.HIGH_VOLATILITY_CHOP, 'Defines HIGH_VOLATILITY_CHOP regime');
+  assert(EOD_MARKET_REGIMES.LOW_LIQUIDITY_DRIFT, 'Defines LOW_LIQUIDITY_DRIFT regime');
+
+  assert(NEWS_CATALYSTS.FOMC_RATE_DECISION, 'Defines FOMC catalyst');
+  assert(NEWS_CATALYSTS.CPI_INFLATION, 'Defines CPI catalyst');
+  assert(NEWS_CATALYSTS.NFP_JOBS, 'Defines NFP catalyst');
+  assert(NEWS_CATALYSTS.NONE_TECHNICAL_ONLY, 'Defines NONE_TECHNICAL_ONLY catalyst');
+
+  assert(EMOTIONAL_STATES.CALM_CENTERED, 'Defines CALM_CENTERED emotional state');
+  assert(EMOTIONAL_STATES.ALERT_FLOW, 'Defines ALERT_FLOW emotional state');
+  assert(EMOTIONAL_STATES.TILT_REVENGE, 'Defines TILT_REVENGE emotional state');
+
+  // 2. Daily Trading Synthesis
+  const mockTrades = [
+    {
+      id: 't-eod-1',
+      date: '2026-09-22T09:30:00Z',
+      symbol: 'NQ',
+      direction: 'LONG',
+      netPnL: 350.00,
+      commissions: 2.70,
+      rMultiple: 2.5,
+      source: 'PERSONAL',
+      violations: []
+    },
+    {
+      id: 't-eod-2',
+      date: '2026-09-22T14:45:00Z',
+      symbol: 'ES',
+      direction: 'SHORT',
+      netPnL: -150.00,
+      commissions: 2.50,
+      rMultiple: -1.0,
+      source: 'PERSONAL',
+      violations: []
+    },
+    {
+      id: 't-eod-sample',
+      date: '2026-09-22T10:00:00Z',
+      symbol: 'SAMPLE',
+      netPnL: 999.00,
+      source: 'SAMPLE',
+      isSample: true
+    }
+  ];
+
+  const mockPlans = [
+    {
+      id: 'plan-1',
+      plannedAt: '2026-09-22T08:45:00Z',
+      symbol: 'NQ',
+      plannedEntryPrice: 19800,
+      plannedStopLoss: 19760
+    }
+  ];
+
+  const mockMissed = [
+    {
+      id: 'missed-1',
+      loggedAt: '2026-09-22T11:00:00Z',
+      symbol: 'CL',
+      isDisciplineWin: true,
+      reasonCode: 'OFF_PLAN_FILTER'
+    }
+  ];
+
+  const synthesis = synthesizeDailyTradingSummary('2026-09-22', mockTrades, mockPlans, mockMissed);
+  assertEquals(synthesis.dateKey, '2026-09-22', 'Synthesis matches requested dateKey');
+  assertEquals(synthesis.hasActivity, true, 'Synthesis flags active trading date');
+  assertEquals(synthesis.trades.length, 2, 'Sample trade excluded: 2 personal trades analyzed');
+  assertEquals(synthesis.performance.totalTrades, 2, 'Performance total trades is 2');
+  assertEquals(synthesis.performance.wins, 1, '1 win recorded');
+  assertEquals(synthesis.performance.losses, 1, '1 loss recorded');
+  assertEquals(synthesis.performance.winRate, 50.0, 'Win rate is 50.0%');
+  assertEquals(synthesis.performance.netPnL, 200.00, 'Realized net P&L is +$200.00 (350 - 150)');
+  assertEquals(synthesis.performance.totalR, 1.5, 'Total realized R is +1.50R');
+  assertEquals(synthesis.performance.totalCommissions, 5.20, 'Commissions totaled $5.20');
+  assertEquals(synthesis.performance.complianceRate, 100.0, '100% compliance rate');
+  assertEquals(synthesis.sessions.LONDON.trades, 1, '1 trade in London session');
+  assertEquals(synthesis.sessions.NEW_YORK_AM.trades, 1, '1 trade in NY AM session');
+  assertEquals(synthesis.planning.plansCount, 1, '1 pre-entry plan counted');
+  assertEquals(synthesis.planning.missedCount, 1, '1 missed setup counted');
+  assertEquals(synthesis.planning.disciplineWins, 1, '1 discipline win counted');
+  assert(synthesis.observations.length >= 2, 'Generated empirical observations');
+  assertEquals(synthesis.isPrediction, false, 'Daily synthesis explicitly marked isPrediction: false');
+
+  // 3. EOD Review Evaluation: Exemplary Clean Discipline
+  const cleanInput = {
+    dateKey: '2026-09-22',
+    marketRegime: 'TRENDING_BULL',
+    catalysts: ['CPI_INFLATION'],
+    marketContextNotes: 'Higher low confirmed on daily chart; strong momentum above 19800.',
+    emotionalState: 'CALM_CENTERED',
+    energyRating: 4,
+    rubric: {
+      followedDailyPlan: true,
+      respectedStops: true,
+      respectedDailyLimits: true,
+      resistedImpulseFOMO: true,
+      acceptedRiskFully: true
+    },
+    wellDone: 'Stuck to pre-entry plan on NQ and did not chase ES after exit.',
+    biggestFriction: 'Slight hesitation on second ES setup.',
+    focusTomorrow: 'Trust written setup triggers without hesitation.'
+  };
+
+  const cleanReview = evaluateEODReview(cleanInput, synthesis);
+  assertEquals(cleanReview.processDisciplineScore, 100, 'Clean rubric produces 100% discipline score');
+  assertEquals(cleanReview.ruleAdherenceVerdict, 'CLEAN_DISCIPLINE', 'Verdict is CLEAN_DISCIPLINE');
+  assertEquals(cleanReview.ruleAdherenceSeal, 'DISCIPLINED EXECUTION ✓', 'Clean discipline seal awarded');
+  assertEquals(cleanReview.energyRating, 4, 'Energy rating preserved');
+  assertEquals(cleanReview.reflections.wellDone, 'Stuck to pre-entry plan on NQ and did not chase ES after exit.', 'Well done reflection saved');
+
+  // 4. EOD Review Evaluation: Rule Breach Handling
+  const breachTrades = [
+    {
+      id: 't-eod-breach',
+      date: '2026-09-23T15:00:00Z',
+      symbol: 'NQ',
+      direction: 'LONG',
+      netPnL: -450.00,
+      rMultiple: -3.0,
+      violations: ['STOP_WIDENED', 'OVERTRADING'],
+      source: 'PERSONAL'
+    }
+  ];
+  const breachSynthesis = synthesizeDailyTradingSummary('2026-09-23', breachTrades, [], []);
+  const breachInput = {
+    dateKey: '2026-09-23',
+    marketRegime: 'HIGH_VOLATILITY_CHOP',
+    catalysts: ['NONE_TECHNICAL_ONLY'],
+    emotionalState: 'TILT_REVENGE',
+    energyRating: 2,
+    rubric: {
+      followedDailyPlan: false,
+      respectedStops: false,
+      respectedDailyLimits: false,
+      resistedImpulseFOMO: false,
+      acceptedRiskFully: false
+    },
+    biggestFriction: 'Widened stop loss and doubled size when down.'
+  };
+
+  const breachReview = evaluateEODReview(breachInput, breachSynthesis);
+  assertEquals(breachReview.ruleAdherenceVerdict, 'RULE_BREACH', 'Severe breaches flag RULE_BREACH verdict');
+  assertEquals(breachReview.ruleAdherenceSeal, 'RULE BREACH AUDITED ⚠️', 'Rule breach seal attached');
+  assert(breachReview.processDisciplineScore <= 50, 'Discipline score heavily penalized on rule breaches');
+
+  // 5. Deliberate Pass Day (Patience Celebrated)
+  const passSynthesis = synthesizeDailyTradingSummary('2026-09-24', [], [], [{ id: 'm-1', loggedAt: '2026-09-24T10:00:00Z', isDisciplineWin: true }]);
+  const passReview = evaluateEODReview({ dateKey: '2026-09-24', emotionalState: 'CALM_CENTERED', rubric: { followedDailyPlan: true } }, passSynthesis);
+  assertEquals(passReview.ruleAdherenceVerdict, 'DELIBERATE_PASS_DAY', '0 trade stand-down yields DELIBERATE_PASS_DAY');
+  assertEquals(passReview.processDisciplineScore, 100, 'Stand-down awarded 100% process discipline score');
+  assertEquals(passReview.ruleAdherenceSeal, 'PATIENCE HONORED: $0 RISK 🛡️', 'Restraint celebrated with capital preservation seal');
+
+  // 6. Exportable Daily Archival Report Card
+  const reportMd = generateExportableDailyReport(cleanReview, synthesis);
+  assert(typeof reportMd === 'string' && reportMd.length > 200, 'Generates comprehensive Markdown report');
+  assert(reportMd.includes('# Ledger & Wick — Archival Daily Journal Entry'), 'Report contains archival header');
+  assert(reportMd.includes('DISCIPLINED EXECUTION ✓'), 'Report contains discipline seal');
+  assert(reportMd.includes('CPI / PPI Inflation Release'), 'Report contains macro catalysts');
+  assert(reportMd.includes('Win Rate'), 'Report contains win rate table');
+  assert(reportMd.includes('Process Discipline Checklist'), 'Report includes discipline checklist');
+  assert(reportMd.includes('Epistemological Notice'), 'Report includes non-predictive epistemological notice');
+
+  // 7. Validation of EOD Review Payload
+  const validPayload = validateEODReviewPayload({ dateKey: '2026-09-22', marketRegime: 'TRENDING_BULL', energyRating: 4 });
+  assertEquals(validPayload.valid, true, 'Valid payload passes validation');
+  const invalidDate = validateEODReviewPayload({ dateKey: 'invalid-date' });
+  assertEquals(invalidDate.valid, false, 'Invalid date format rejected');
+  const invalidEnergy = validateEODReviewPayload({ dateKey: '2026-09-22', energyRating: 9 });
+  assertEquals(invalidEnergy.valid, false, 'Energy rating > 5 rejected');
 }
 
 console.log('\n================================================================');

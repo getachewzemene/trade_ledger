@@ -2302,5 +2302,133 @@ table.ledger-table tr.row-violation {
   border-bottom: 1px solid var(--ledger-paper-border);
 }
 
+/* ==========================================================================
+   Structured End-of-Day (EOD) Review & Daily Journal Archive
+   ========================================================================== */
+
+#eod-review-modal .modal-box {
+  max-width: 980px;
+  width: 95vw;
+}
+
+.eod-section-card {
+  background: #FFFFFF;
+  border: 1px solid var(--ledger-paper-border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.eod-section-title {
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  color: var(--ink-primary);
+  margin: 0 0 0.65rem 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--ledger-paper-border);
+  padding-bottom: 0.35rem;
+}
+
+.eod-rubric-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.eod-rubric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.65rem;
+  background: var(--ledger-paper-subtle);
+  border: 1px solid var(--ledger-paper-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.eod-rubric-row:hover {
+  background: #F4EEDC;
+}
+
+.eod-rubric-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ink-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.eod-rubric-weight {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  background: #FFF;
+  border: 1px solid var(--ledger-paper-border);
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+}
+
+.eod-catalyst-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.eod-catalyst-chip {
+  font-size: 0.73rem;
+  font-family: var(--font-mono);
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--ledger-paper-border);
+  background: #FFF;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.eod-catalyst-chip.selected {
+  background: #EAE3CF;
+  border-color: var(--accent-brass);
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.eod-report-preview {
+  background: #FFFDF8;
+  border: 1.5px solid var(--ledger-paper-border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 380px;
+  overflow-y: auto;
+  color: var(--ink-primary);
+}
+
+.eod-energy-stars {
+  display: flex;
+  gap: 0.35rem;
+  font-size: 1.25rem;
+  color: #D4AF37;
+  cursor: pointer;
+}
+
+.eod-energy-stars span {
+  transition: transform 0.1s ease;
+}
+
+.eod-energy-stars span:hover {
+  transform: scale(1.2);
+}
+
+
 
 
