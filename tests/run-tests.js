@@ -92,6 +92,29 @@ import {
   compareVisualAccountabilityCohorts,
   generateVisualJournalObservations
 } from '../src/engine/visual-journal.js';
+import {
+  SESSION_BLOCKS,
+  SESSION_ORDER,
+  DAYS_OF_WEEK,
+  CALENDAR_DISCLAIMER,
+  classifySessionBlock,
+  formatDateKey,
+  isTradeCompliant,
+  aggregateDailyActivity,
+  buildMonthlyCalendar,
+  buildWeeklyMatrix,
+  generateSessionHeatmap,
+  buildDayAudit
+} from '../src/engine/calendar-heatmap.js';
+import {
+  SUPPORTED_BROKERS,
+  normalizeContractSymbol,
+  detectBrokerFormat,
+  extractExecutionFills,
+  parseSingleRoundtripSummary,
+  pairExecutionsIntoTrades,
+  parseBrokerOrderText
+} from '../src/engine/broker-parser.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -1656,6 +1679,293 @@ console.log('\n--- Suite 22: Visual Trade Journal, Screenshot Ingestion & Dual L
   const beforeAfterObs = observations.find(o => o.id === 'before-after-coverage');
   assert(beforeAfterObs !== undefined, 'Surfaces dual Before/After coverage observation');
   assertEquals(beforeAfterObs.eventCount, 2, 'Dual chart count = 2');
+}
+
+console.log('\n--- Suite 23: Interactive Calendar & Session Heatmap Engine ---');
+{
+  // 1. Session Block Constants & Definitions
+  assertEquals(SESSION_ORDER.length, 5, 'Defines 5 core session blocks');
+  assertEquals(SESSION_BLOCKS.LONDON.id, 'LONDON', 'London session defined');
+  assertEquals(SESSION_BLOCKS.NEW_YORK_AM.id, 'NEW_YORK_AM', 'New York AM session defined');
+  assertEquals(SESSION_BLOCKS.NEW_YORK_PM.id, 'NEW_YORK_PM', 'New York PM session defined');
+  assertEquals(SESSION_BLOCKS.ASIAN.id, 'ASIAN', 'Asian session defined');
+  assertEquals(SESSION_BLOCKS.OVERNIGHT.id, 'OVERNIGHT', 'Overnight session defined');
+  assertEquals(DAYS_OF_WEEK.length, 7, '7 days of the week defined starting Monday');
+  assertEquals(DAYS_OF_WEEK[0].key, 'MONDAY', 'Week starts on Monday');
+
+  // 2. Session Classification Engine
+  // Explicit session string
+  assertEquals(classifySessionBlock({ session: 'LONDON' }).id, 'LONDON', 'Classifies explicit London session');
+  assertEquals(classifySessionBlock({ session: 'New York AM' }).id, 'NEW_YORK_AM', 'Classifies explicit New York AM session');
+  assertEquals(classifySessionBlock({ session: 'NY PM' }).id, 'NEW_YORK_PM', 'Classifies explicit NY PM session');
+  assertEquals(classifySessionBlock({ session: 'ASIAN' }).id, 'ASIAN', 'Classifies explicit Asian session');
+  assertEquals(classifySessionBlock({ session: 'OVERNIGHT' }).id, 'OVERNIGHT', 'Classifies explicit Overnight session');
+
+  // Automatic timestamp classification
+  assertEquals(classifySessionBlock({ entryDate: '2026-09-21T03:30:00Z' }).id, 'ASIAN', '03:30 UTC classified as ASIAN');
+  assertEquals(classifySessionBlock({ entryDate: '2026-09-21T09:15:00Z' }).id, 'LONDON', '09:15 UTC classified as LONDON');
+  assertEquals(classifySessionBlock({ entryDate: '2026-09-21T14:30:00Z' }).id, 'NEW_YORK_AM', '14:30 UTC classified as NEW_YORK_AM');
+  assertEquals(classifySessionBlock({ entryDate: '2026-09-21T18:00:00Z' }).id, 'NEW_YORK_PM', '18:00 UTC classified as NEW_YORK_PM');
+  assertEquals(classifySessionBlock({ entryDate: '2026-09-21T22:30:00Z' }).id, 'OVERNIGHT', '22:30 UTC classified as OVERNIGHT');
+
+  // 3. Date Key Normalization
+  assertEquals(formatDateKey('2026-09-21T09:15:00Z'), '2026-09-21', 'Normalizes ISO timestamp to YYYY-MM-DD');
+  assertEquals(formatDateKey('2026-09-21'), '2026-09-21', 'Preserves clean YYYY-MM-DD');
+  assertEquals(formatDateKey(new Date(Date.UTC(2026, 8, 22, 14, 0))), '2026-09-22', 'Converts Date object to YYYY-MM-DD');
+
+  // 4. Daily Activity Aggregator with Sample Isolation
+  const sampleTrades = [
+    { id: 'T-SMP1', source: 'SAMPLE', entryDate: '2026-09-21T09:00:00Z', netPnL: 500, rMultiple: 2.0, isFullyCompliant: true }
+  ];
+  const personalTrades = [
+    // 2026-09-21: London win, NY AM loss
+    { id: 'T1', source: 'PERSONAL', entryDate: '2026-09-21T09:15:00Z', netPnL: 250, rMultiple: 2.5, isFullyCompliant: true, hasVisualEvidence: true, preEntryScreenshotUrl: '/before.png' },
+    { id: 'T2', source: 'PERSONAL', entryDate: '2026-09-21T14:45:00Z', netPnL: -100, rMultiple: -1.0, isFullyCompliant: false, violations: ['LATE_CHASE'] },
+    // 2026-09-22: London win
+    { id: 'T3', source: 'PERSONAL', entryDate: '2026-09-22T08:30:00Z', netPnL: 300, rMultiple: 3.0, isFullyCompliant: true, hasVisualEvidence: true, outcomeScreenshotUrl: '/after.png' },
+    // 2026-09-23: NY PM loss
+    { id: 'T4', source: 'PERSONAL', entryDate: '2026-09-23T19:00:00Z', netPnL: -150, rMultiple: -1.5, isFullyCompliant: true }
+  ];
+  const testPlans = [
+    { id: 'P1', plannedAt: '2026-09-21T08:45:00Z', symbol: 'EURUSD', screenshotUrl: '/plan_chart.png' }
+  ];
+  const testMissed = [
+    { id: 'M1', loggedAt: '2026-09-21T11:00:00Z', symbol: 'GBPUSD', isDisciplineWin: true }
+  ];
+
+  const allTrades = [...sampleTrades, ...personalTrades];
+  const dailyMap = aggregateDailyActivity(allTrades, testPlans, testMissed, { excludeSample: true });
+
+  const day21 = dailyMap.get('2026-09-21');
+  assert(day21 !== undefined, '2026-09-21 aggregated in daily map');
+  assertEquals(day21.totalTrades, 2, 'Sample trade excluded: 2 personal trades on 2026-09-21');
+  assertEquals(day21.netPnL, 150, 'Net PnL = +150 (250 - 100)');
+  assertEquals(day21.wins, 1, '1 win');
+  assertEquals(day21.losses, 1, '1 loss');
+  assertEquals(day21.winRate, 50.0, 'Win rate = 50.0%');
+  assertEquals(day21.compliantTrades, 1, '1 compliant trade');
+  assertEquals(day21.complianceRate, 50.0, 'Compliance rate = 50.0%');
+  assertEquals(day21.hasVisualEvidence, true, 'Visual evidence detected on day');
+  assertEquals(day21.plansCount, 1, '1 pre-entry plan logged on day');
+  assertEquals(day21.missedCount, 1, '1 missed setup logged on day');
+  assertEquals(day21.disciplineWins, 1, '1 discipline win recorded on day');
+  assertEquals(day21.status, 'PROFITABLE', 'Day status is PROFITABLE');
+  assertEquals(day21.sessions.LONDON.count, 1, 'London session has 1 trade');
+  assertEquals(day21.sessions.LONDON.netPnL, 250, 'London session net PnL = +250');
+  assertEquals(day21.sessions.NEW_YORK_AM.count, 1, 'New York AM session has 1 trade');
+  assertEquals(day21.sessions.NEW_YORK_AM.netPnL, -100, 'New York AM session net PnL = -100');
+
+  // 5. Monthly Calendar Builder (September 2026)
+  // September 2026 starts on Tuesday (Sept 1) and has 30 days
+  const sepCal = buildMonthlyCalendar(2026, 8, allTrades, testPlans, testMissed, { excludeSample: true });
+  assertEquals(sepCal.year, 2026, 'Calendar year is 2026');
+  assertEquals(sepCal.monthIndex, 8, 'Calendar month index is 8');
+  assertEquals(sepCal.monthName, 'September', 'Month name is September');
+  assertEquals(sepCal.daysInMonth, 30, 'September has 30 days');
+  assert(sepCal.weeks.length >= 5, 'September 2026 has at least 5 weekly rows');
+
+  // Week 1 has padding from August (Monday Aug 31)
+  const firstWeek = sepCal.weeks[0];
+  assertEquals(firstWeek.days.length, 7, 'Each calendar week has 7 days');
+  assertEquals(firstWeek.days[0].isCurrentMonth, false, 'First day is previous month padding (Aug 31)');
+  assertEquals(firstWeek.days[1].isCurrentMonth, true, 'Second day is Sept 1');
+  assertEquals(firstWeek.days[1].dayNumber, 1, 'Day number is 1');
+
+  // Monthly summary stats
+  assertEquals(sepCal.summary.totalTrades, 4, 'Month summary: 4 personal trades');
+  assertEquals(sepCal.summary.tradingDaysCount, 3, 'Trading occurred on 3 separate days');
+  assertEquals(sepCal.summary.profitableDaysCount, 2, '2 profitable days (Sept 21, 22)');
+  assertEquals(sepCal.summary.losingDaysCount, 1, '1 losing day (Sept 23)');
+  assertEquals(sepCal.summary.dayWinRate, 66.7, 'Day win rate = 66.7% (2/3)');
+  assertEquals(sepCal.summary.monthNetPnL, 300, 'Month net PnL = +$300 (150 + 300 - 150)');
+  assertEquals(sepCal.summary.monthTotalR, 3.0, 'Month total R = +3.0R');
+  assertEquals(sepCal.summary.monthWinRate, 50.0, 'Month trade win rate = 50.0% (2/4)');
+  assert(sepCal.summary.monthWinRateCI.formatted !== undefined, 'Calculates Wilson 95% CI on month win rate');
+  assertEquals(sepCal.summary.monthCompliantTrades, 3, '3 compliant trades out of 4');
+  assertEquals(sepCal.summary.monthComplianceRate, 75.0, 'Month rule compliance rate = 75.0%');
+  assert(sepCal.summary.monthComplianceCI.formatted !== undefined, 'Calculates Wilson 95% CI on compliance rate');
+  assertEquals(sepCal.summary.totalPlans, 1, '1 pre-entry plan in month');
+  assertEquals(sepCal.summary.totalMissed, 1, '1 missed setup in month');
+  assertEquals(sepCal.isPrediction, false, 'Calendar model explicitly marked isPrediction: false');
+
+  // 6. Weekly Matrix View
+  const weeklyMatrix = buildWeeklyMatrix(2026, 8, allTrades, testPlans, testMissed, { excludeSample: true });
+  assertEquals(weeklyMatrix.year, 2026, 'Weekly matrix year is 2026');
+  assert(weeklyMatrix.weeks.length >= 5, 'Weekly matrix contains week rows');
+  // Find week containing Sept 21-23
+  const activeWeek = weeklyMatrix.weeks.find(w => w.weekTrades > 0);
+  assert(activeWeek !== undefined, 'Found week with trade activity');
+  assertEquals(activeWeek.weekTrades, 4, 'Active week has 4 trades');
+  assertEquals(activeWeek.weekNetPnL, 300, 'Active week net PnL = +300');
+  assertEquals(activeWeek.status, 'PROFITABLE', 'Active week status is PROFITABLE');
+  assertEquals(activeWeek.weekComplianceRate, 75.0, 'Active week compliance rate = 75.0%');
+
+  // 7. Session Heatmap Cross-Matrix & Observations
+  const sessionHeatmap = generateSessionHeatmap(allTrades, { excludeSample: true });
+  assertEquals(sessionHeatmap.totalTradesAnalyzed, 4, 'Session heatmap analyzed 4 personal trades');
+  assert(sessionHeatmap.matrix.LONDON !== undefined, 'Matrix has London row');
+  assert(sessionHeatmap.matrix.NEW_YORK_AM !== undefined, 'Matrix has NY AM row');
+  assert(sessionHeatmap.matrix.NEW_YORK_PM !== undefined, 'Matrix has NY PM row');
+
+  // Check London session stats
+  const londonSummary = sessionHeatmap.sessions.LONDON;
+  assertEquals(londonSummary.totalTrades, 2, 'London session had 2 trades');
+  assertEquals(londonSummary.wins, 2, 'London session had 2 wins');
+  assertEquals(londonSummary.winRate, 100.0, 'London session win rate = 100%');
+  assertEquals(londonSummary.netPnL, 550, 'London session net PnL = +550 (250 + 300)');
+  assertEquals(londonSummary.compliantTrades, 2, 'London compliance = 2/2');
+  assertEquals(londonSummary.complianceRate, 100.0, 'London compliance rate = 100%');
+
+  // Check NY PM session stats
+  const nyPmSummary = sessionHeatmap.sessions.NEW_YORK_PM;
+  assertEquals(nyPmSummary.totalTrades, 1, 'NY PM had 1 trade');
+  assertEquals(nyPmSummary.losses, 1, 'NY PM had 1 loss');
+  assertEquals(nyPmSummary.netPnL, -150, 'NY PM net PnL = -150');
+
+  // Heatmap empirical observations
+  assert(sessionHeatmap.observations.length >= 2, 'Session heatmap produced empirical observations');
+  assert(sessionHeatmap.observations.every(o => o.isPrediction === false), 'All session observations marked isPrediction: false');
+  const pnlLeaderObs = sessionHeatmap.observations.find(o => o.id === 'session-pnl-leader');
+  assert(pnlLeaderObs !== undefined, 'Identified session P&L leader');
+  assert(pnlLeaderObs.text.includes('London Morning'), 'London identified as largest cumulative P&L');
+
+  // 8. Day-Level Audit Bundle
+  const dayAudit = buildDayAudit('2026-09-21', allTrades, testPlans, testMissed, { excludeSample: true });
+  assertEquals(dayAudit.dateKey, '2026-09-21', 'Day audit date is 2026-09-21');
+  assertEquals(dayAudit.hasActivity, true, 'Day audit flags activity');
+  assertEquals(dayAudit.trades.length, 2, 'Day audit contains 2 trade records');
+  assertEquals(dayAudit.plans.length, 1, 'Day audit contains 1 plan');
+  assertEquals(dayAudit.missed.length, 1, 'Day audit contains 1 missed setup');
+  assertEquals(dayAudit.summary.netPnL, 150, 'Day audit summary PnL = +150');
+  assertEquals(dayAudit.summary.status, 'PROFITABLE', 'Day audit status is PROFITABLE');
+  assertEquals(dayAudit.summary.hasVisualEvidence, true, 'Day audit flags visual evidence present');
+  assertEquals(dayAudit.summary.plansCount, 1, 'Day audit pre-entry plan count = 1');
+  assertEquals(dayAudit.summary.missedCount, 1, 'Day audit missed setups count = 1');
+
+  // Day audit for an inactive day
+  const emptyDayAudit = buildDayAudit('2026-09-01', allTrades, testPlans, testMissed, { excludeSample: true });
+  assertEquals(emptyDayAudit.dateKey, '2026-09-01', 'Empty day audit date is 2026-09-01');
+  assertEquals(emptyDayAudit.hasActivity, false, 'Empty day audit flags no activity');
+  assertEquals(emptyDayAudit.trades.length, 0, 'Empty day has 0 trades');
+}
+
+console.log('\n--- Suite 24: Rapid Broker Order Text Parser & Quick Ingest Engine ---');
+{
+  // 1. Broker Detection
+  assertEquals(detectBrokerFormat('Filled Buy 1 NQU6 @ 19850.50').id, 'TRADOVATE_NINJA', 'Detects Tradovate/NinjaTrader format');
+  assertEquals(detectBrokerFormat('BOT 100 AAPL @ 182.50 on NASDAQ').id, 'INTERACTIVE_BROKERS', 'Detects Interactive Brokers format');
+  assertEquals(detectBrokerFormat('2026.09.22 14:15:00 buy 0.50 EURUSD 1.08500').id, 'METATRADER', 'Detects MetaTrader format');
+  assertEquals(detectBrokerFormat('Filled BUY +50 NVDA @ 122.50').id, 'THINKORSWIM', 'Detects Thinkorswim format');
+  assertEquals(detectBrokerFormat('Buy Market 1 BTCUSD Executed at 63250').id, 'TRADINGVIEW', 'Detects TradingView format');
+
+  // 2. Symbol Normalization
+  assertEquals(normalizeContractSymbol('NQU6'), 'NQ', 'Strips futures month code NQU6 -> NQ');
+  assertEquals(normalizeContractSymbol('ES 09-26'), 'ES', 'Normalizes ES contract');
+  assertEquals(normalizeContractSymbol('MESU26'), 'MES', 'Normalizes Micro ES MESU26 -> MES');
+  assertEquals(normalizeContractSymbol('CLV6'), 'CL', 'Normalizes Crude Oil CLV6 -> CL');
+  assertEquals(normalizeContractSymbol('EUR/USD'), 'EURUSD', 'Normalizes Forex pair EUR/USD -> EURUSD');
+  assertEquals(normalizeContractSymbol('EURUSDpro'), 'EURUSD', 'Strips broker account suffix EURUSDpro -> EURUSD');
+  assertEquals(normalizeContractSymbol('BTC/USD'), 'BTCUSD', 'Normalizes Crypto pair BTC/USD -> BTCUSD');
+  assertEquals(normalizeContractSymbol('NVDA'), 'NVDA', 'Preserves Equity symbol NVDA');
+
+  // 3. Tradovate / NinjaTrader Fills Parsing & Pairing (Long Futures)
+  const tradovateText = `
+    Filled Buy 1 NQU6 @ 19850.50 09/22/2026 09:35:12 Fee: 1.35
+    Filled Sell 1 NQU6 @ 19910.00 09/22/2026 10:02:15 Fee: 1.35
+  `;
+  const tvResult = parseBrokerOrderText(tradovateText);
+  assertEquals(tvResult.success, true, 'Tradovate text parsed successfully');
+  assertEquals(tvResult.detectedBroker.id, 'TRADOVATE_NINJA', 'Identified as Tradovate/NinjaTrader');
+  assertEquals(tvResult.fillCount, 2, '2 execution fills extracted');
+  assertEquals(tvResult.trades.length, 1, '1 paired roundtrip trade constructed');
+
+  const tvTrade = tvResult.trades[0];
+  assertEquals(tvTrade.symbol, 'NQ', 'Root symbol is NQ');
+  assertEquals(tvTrade.direction, 'LONG', 'Direction is LONG');
+  assertEquals(tvTrade.entryPrice, 19850.5, 'Entry price is 19850.50');
+  assertEquals(tvTrade.exitPrice, 19910.0, 'Exit price is 19910.00');
+  assertEquals(tvTrade.quantity, 1, 'Quantity is 1 contract');
+  assertEquals(tvTrade.fees, 2.7, 'Total fees = 2.70 (1.35 * 2)');
+  // 59.5 points * $20/pt = $1190.00 gross - $2.70 fees = $1187.30 net
+  assertEquals(tvTrade.netPnL, 1187.3, 'Net P&L is +$1187.30 (59.5 pts * $20 - $2.70)');
+  assertEquals(tvTrade.session, 'LONDON', 'Inferred session is LONDON (09:35 UTC)');
+  assertEquals(tvTrade.source, 'BROKER_IMPORT', 'Provenance tagged as BROKER_IMPORT');
+
+  // 4. Interactive Brokers Equity Fills (Short Stock)
+  const ibkrText = `
+    2026-09-22 14:35:00 SLD 100 NVDA @ 125.00 Comm: 1.00
+    2026-09-22 15:20:00 BOT 100 NVDA @ 122.50 Comm: 1.00
+  `;
+  const ibResult = parseBrokerOrderText(ibkrText);
+  assertEquals(ibResult.success, true, 'IBKR text parsed successfully');
+  assertEquals(ibResult.detectedBroker.id, 'INTERACTIVE_BROKERS', 'Identified as Interactive Brokers');
+  assertEquals(ibResult.trades.length, 1, '1 trade created');
+
+  const ibTrade = ibResult.trades[0];
+  assertEquals(ibTrade.symbol, 'NVDA', 'Symbol is NVDA');
+  assertEquals(ibTrade.direction, 'SHORT', 'Opened with SLD -> Direction is SHORT');
+  assertEquals(ibTrade.entryPrice, 125.0, 'Entry price is 125.00');
+  assertEquals(ibTrade.exitPrice, 122.5, 'Exit price is 122.50');
+  assertEquals(ibTrade.fees, 2.0, 'Total commission = $2.00');
+  // (125 - 122.5) * 100 - 2 = +$248.00 net
+  assertEquals(ibTrade.netPnL, 248.0, 'Net P&L is +$248.00');
+  assertEquals(ibTrade.session, 'NEW_YORK_AM', 'Inferred session is NEW_YORK_AM (14:35 UTC)');
+
+  // 5. MetaTrader 4 / 5 Deal History Row with explicit profit & SL
+  const mtText = `
+    2026.09.22 14:15:00 buy 0.50 EURUSD 1.08500 1.08300 1.08950 2026.09.22 16:30:00 1.08920 -3.50 0.00 210.00
+  `;
+  const mtResult = parseBrokerOrderText(mtText);
+  assertEquals(mtResult.success, true, 'MetaTrader row parsed successfully');
+  assertEquals(mtResult.detectedBroker.id, 'METATRADER', 'Identified as MetaTrader');
+  assertEquals(mtResult.trades.length, 1, 'Constructed trade from history row');
+
+  const mtTrade = mtResult.trades[0];
+  assertEquals(mtTrade.symbol, 'EURUSD', 'Symbol is EURUSD');
+  assertEquals(mtTrade.direction, 'LONG', 'Direction is LONG');
+  assertEquals(mtTrade.entryPrice, 1.085, 'Entry price is 1.08500');
+  assertEquals(mtTrade.exitPrice, 1.0892, 'Exit price is 1.08920');
+  assertEquals(mtTrade.stopLoss, 1.083, 'Extracted stop loss 1.08300');
+  assertEquals(mtTrade.takeProfit, 1.0895, 'Extracted take profit 1.08950');
+  assertEquals(mtTrade.fees, 3.5, 'Extracted commission $3.50');
+  assertEquals(mtTrade.netPnL, 210.0, 'Extracted exact broker net P&L $210.00');
+  assertEquals(mtTrade.plannedRiskDollars, 100, 'Calculated planned risk from SL (20 pips * 0.5 lot = $100)');
+  assertEquals(mtTrade.rMultiple, 2.1, 'Realized R is +2.10R (210 / 100)');
+
+  // 6. Thinkorswim Fills
+  const tosText = `
+    10:15:22 Filled BUY +50 TSLA @ 245.00
+    11:00:15 Filled SELL -50 TSLA @ 248.50
+  `;
+  const tosResult = parseBrokerOrderText(tosText);
+  assertEquals(tosResult.success, true, 'Thinkorswim fills parsed successfully');
+  assertEquals(tosResult.trades.length, 1, '1 trade constructed');
+  const tosTrade = tosResult.trades[0];
+  assertEquals(tosTrade.symbol, 'TSLA', 'Symbol is TSLA');
+  assertEquals(tosTrade.direction, 'LONG', 'Direction is LONG');
+  assertEquals(tosTrade.netPnL, 175.0, 'Net P&L = +$175.00 ((248.5 - 245) * 50)');
+
+  // 7. Single-line roundtrip summary
+  const summaryText = 'Long 1 NQ Entry: 19850.50 Exit: 19910.00 PnL: +1187.30 Fees: 2.70 Date: 2026-09-22';
+  const summaryResult = parseBrokerOrderText(summaryText);
+  assertEquals(summaryResult.success, true, 'Roundtrip summary text parsed');
+  assertEquals(summaryResult.trades.length, 1, '1 trade created');
+  assertEquals(summaryResult.trades[0].symbol, 'NQ', 'Symbol is NQ');
+  assertEquals(summaryResult.trades[0].direction, 'LONG', 'Direction is LONG');
+  assertEquals(summaryResult.trades[0].netPnL, 1187.3, 'Net P&L is 1187.30');
+
+  // 8. Unpaired Fills / Warning handling
+  const incompleteText = 'Filled Buy 1 NQU6 @ 19850.50 09/22/2026 09:35:12 Fee: 1.35';
+  const incompleteResult = parseBrokerOrderText(incompleteText);
+  assertEquals(incompleteResult.success, false, 'Unpaired fill marked success: false (cannot form closed trade)');
+  assertEquals(incompleteResult.fillCount, 1, '1 fill extracted');
+  assertEquals(incompleteResult.unpairedFills.length, 1, '1 unpaired fill reported');
+  assert(incompleteResult.warnings[0].includes('could not be paired'), 'Includes warning explaining open position');
+
+  // 9. Empty text handling
+  const emptyResult = parseBrokerOrderText('');
+  assertEquals(emptyResult.success, false, 'Empty text fails gracefully');
+  assertEquals(emptyResult.trades.length, 0, '0 trades created');
 }
 
 console.log('\n================================================================');

@@ -26,6 +26,7 @@
     </div>
     <nav class="main-nav">
       <button class="nav-btn active" data-view="journal-view">Journal Log</button>
+      <button class="nav-btn" data-view="calendar-view">Calendar &amp; Heatmap 📅</button>
       <button class="nav-btn" data-view="gallery-view">Visual Gallery</button>
       <button class="nav-btn" data-view="presession-view">Pre-Session</button>
       <button class="nav-btn" data-view="trading-plan-view">Trading Plan</button>
@@ -46,6 +47,7 @@
       <button id="btn-open-preentry-modal" class="btn btn-secondary" title="Record plan before pulling the trigger">📝 Plan Trade (Pre-Entry)</button>
       <button id="btn-open-missed-modal" class="btn btn-secondary" title="Document missed setups and celebrate restraint">🎯 Missed Setup</button>
       <button id="btn-tilt-status" class="rubber-stamp stamp-clean" style="cursor: pointer; display: none;" title="Active Cooldown Shield">COOLDOWN SHIELD 🛡️</button>
+      <button id="btn-open-quick-ingest" class="btn btn-secondary" title="Paste raw fills from Tradovate, IBKR, MT4/5, TOS, or TradingView">⚡ Quick Ingest</button>
       <button id="btn-open-modal" class="btn btn-primary">+ Log Trade</button>
       <button id="btn-open-report" class="btn btn-secondary">Quick Report</button>
       <button id="btn-save-backup" class="btn btn-secondary">Save Backup</button>
@@ -180,6 +182,156 @@
             <!-- Populated via JS -->
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <!-- View: Archival Calendar & Session Heatmap -->
+    <section id="calendar-view" class="view-section">
+      <div class="calendar-view-header">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">TEMPORAL AUDIT</span>
+            <h2 style="font-family: var(--font-serif); font-size: 1.5rem; margin: 0;">Archival Calendar &amp; Session Heatmap</h2>
+          </div>
+          <p style="color: var(--ink-secondary); font-size: 0.85rem; margin: 0.25rem 0 0 0;">
+            Track monthly/weekly execution rhythms, session edge, rule compliance, and daily journal audits.
+          </p>
+        </div>
+
+        <div class="calendar-controls-bar">
+          <div class="calendar-month-selector">
+            <button id="cal-btn-prev-month" class="btn btn-secondary btn-sm" title="Previous Month" style="padding: 0.2rem 0.5rem;">◀</button>
+            <span id="cal-current-month-label" class="calendar-current-month-label">September 2026</span>
+            <button id="cal-btn-next-month" class="btn btn-secondary btn-sm" title="Next Month" style="padding: 0.2rem 0.5rem;">▶</button>
+            <button id="cal-btn-today" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">Today</button>
+          </div>
+
+          <div class="calendar-subnav">
+            <button id="cal-subnav-month" class="calendar-subnav-btn active" data-tab="month">Monthly Grid 🗓️</button>
+            <button id="cal-subnav-week" class="calendar-subnav-btn" data-tab="week">Weekly Breakdown 📊</button>
+            <button id="cal-subnav-heatmap" class="calendar-subnav-btn" data-tab="heatmap">Session Heatmap 🌡️</button>
+          </div>
+
+          <select id="cal-filter-source" class="form-control" style="font-size: 0.78rem; padding: 0.25rem 0.5rem; width: 200px;">
+            <option value="VERIFIED">Verified (Personal &amp; Imported)</option>
+            <option value="ALL">All Records (Inc. Sample)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Calendar Summary Ribbon -->
+      <div id="cal-summary-ribbon" class="calendar-ribbon">
+        <div class="cal-ribbon-card">
+          <span class="cal-ribbon-label">Month Net P&amp;L</span>
+          <strong id="cal-stat-pnl" class="cal-ribbon-val">+$0.00</strong>
+          <span id="cal-stat-pf" class="cal-ribbon-sub">Profit Factor: --</span>
+        </div>
+        <div class="cal-ribbon-card">
+          <span class="cal-ribbon-label">Day Win Rate</span>
+          <strong id="cal-stat-day-winrate" class="cal-ribbon-val">0%</strong>
+          <span id="cal-stat-day-counts" class="cal-ribbon-sub">0 Green / 0 Red Days</span>
+        </div>
+        <div class="cal-ribbon-card">
+          <span class="cal-ribbon-label">Trade Win Rate</span>
+          <strong id="cal-stat-trade-winrate" class="cal-ribbon-val">0%</strong>
+          <span id="cal-stat-trade-ci" class="cal-ribbon-sub">95% CI: --</span>
+        </div>
+        <div class="cal-ribbon-card">
+          <span class="cal-ribbon-label">Process Compliance</span>
+          <strong id="cal-stat-compliance" class="cal-ribbon-val">0%</strong>
+          <span id="cal-stat-compliance-ci" class="cal-ribbon-sub">95% CI: --</span>
+        </div>
+        <div class="cal-ribbon-card">
+          <span class="cal-ribbon-label">Visual Coverage</span>
+          <strong id="cal-stat-visuals" class="cal-ribbon-val">0%</strong>
+          <span id="cal-stat-visuals-sub" class="cal-ribbon-sub">Trades with charts</span>
+        </div>
+        <div class="cal-ribbon-card">
+          <span class="cal-ribbon-label">Total Realized R</span>
+          <strong id="cal-stat-total-r" class="cal-ribbon-val">+0.0R</strong>
+          <span id="cal-stat-plans-missed" class="cal-ribbon-sub">0 Plans / 0 Restraints</span>
+        </div>
+      </div>
+
+      <!-- Tab 1: Monthly Calendar Grid -->
+      <div id="cal-tab-month" class="calendar-tab-content">
+        <div class="calendar-grid-container">
+          <div class="calendar-weekdays-header">
+            <div class="calendar-weekday-cell">Monday</div>
+            <div class="calendar-weekday-cell">Tuesday</div>
+            <div class="calendar-weekday-cell">Wednesday</div>
+            <div class="calendar-weekday-cell">Thursday</div>
+            <div class="calendar-weekday-cell">Friday</div>
+            <div class="calendar-weekday-cell" style="color: var(--ink-muted);">Saturday</div>
+            <div class="calendar-weekday-cell" style="color: var(--ink-muted);">Sunday</div>
+          </div>
+          <div id="cal-month-grid" class="calendar-month-grid">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Weekly Matrix Breakdown -->
+      <div id="cal-tab-week" class="calendar-tab-content" style="display: none;">
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <table class="weekly-matrix-table">
+            <thead>
+              <tr>
+                <th>Week</th>
+                <th>Dates</th>
+                <th>Trades</th>
+                <th>Net P&amp;L</th>
+                <th>Win Rate</th>
+                <th>Compliance</th>
+                <th>Total R</th>
+                <th>Plans / Missed</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="cal-week-table-body">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 3: Session Heatmap & Empirical Analytics -->
+      <div id="cal-tab-heatmap" class="calendar-tab-content" style="display: none;">
+        <!-- 2D Heatmap Matrix Table -->
+        <div class="heatmap-matrix-wrapper">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <h4 style="font-family: var(--font-serif); margin: 0; font-size: 1.1rem;">Session × Day of Week Cross-Matrix</h4>
+            <div style="font-size: 0.72rem; color: var(--ink-secondary); display: flex; align-items: center; gap: 0.75rem;">
+              <span>Intensity:</span>
+              <span style="display: inline-flex; align-items: center; gap: 3px;"><span style="display: inline-block; width: 12px; height: 12px; background: #D1EEDB; border-radius: 2px;"></span> Profit</span>
+              <span style="display: inline-flex; align-items: center; gap: 3px;"><span style="display: inline-block; width: 12px; height: 12px; background: #FAD2D2; border-radius: 2px;"></span> Loss</span>
+              <span style="display: inline-flex; align-items: center; gap: 3px;"><span style="display: inline-block; width: 12px; height: 12px; background: #F4F1E8; border-radius: 2px;"></span> No Trades</span>
+            </div>
+          </div>
+          <div id="cal-heatmap-table-container">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+
+        <!-- Session Aggregate Metric Cards -->
+        <h4 style="font-family: var(--font-serif); margin: 1.25rem 0 0.75rem 0; font-size: 1.15rem;">Session Block Performance</h4>
+        <div id="cal-session-cards-container" class="session-cards-grid">
+          <!-- Populated via JS -->
+        </div>
+
+        <!-- Empirical Session Observations -->
+        <div class="card" style="background: var(--ledger-paper-subtle); border: 1.5px solid var(--accent-brass); margin-top: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">EMPIRICAL FINDINGS</span>
+              <strong style="font-family: var(--font-serif); font-size: 1.05rem;">Session Performance Observations</strong>
+            </div>
+            <span style="font-size: 0.7rem; font-family: var(--font-mono); color: var(--ink-muted);">Descriptive Retrospective Only</span>
+          </div>
+          <div id="cal-session-observations-list" style="display: grid; gap: 0.6rem; font-size: 0.85rem; line-height: 1.5; color: var(--ink-primary);">
+            <!-- Populated via JS -->
+          </div>
+        </div>
       </div>
     </section>
 
@@ -2359,6 +2511,197 @@
           <button type="submit" class="btn btn-primary">Record Missed Setup</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Day Ledger Audit & Inspection Modal -->
+  <div id="day-audit-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 920px; width: 95vw; max-height: 92vh; overflow-y: auto;">
+      <div class="modal-header">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="rubber-stamp stamp-neutral" id="day-audit-badge">DAY AUDIT</span>
+            <h2 id="day-audit-date-title" style="margin: 0; font-size: 1.35rem;">Day Ledger Audit</h2>
+          </div>
+          <div id="day-audit-date-subtitle" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); margin-top: 0.2rem;"></div>
+        </div>
+        <button id="btn-close-day-audit" class="close-btn">&times;</button>
+      </div>
+
+      <!-- Day Summary Hero -->
+      <div class="day-audit-hero">
+        <div>
+          <span class="cal-ribbon-label">Daily Realized Outcome</span>
+          <div id="day-audit-pnl-headline" style="font-size: 1.6rem; font-family: var(--font-mono); font-weight: 700;">+$0.00</div>
+          <div id="day-audit-r-headline" style="font-size: 0.8rem; font-family: var(--font-mono); color: var(--ink-secondary);">+0.0R net</div>
+        </div>
+        <div class="day-audit-metrics">
+          <div class="day-audit-metric-pill">
+            <span class="lbl">Trades</span>
+            <span id="day-audit-stat-trades" class="val">0</span>
+          </div>
+          <div class="day-audit-metric-pill">
+            <span class="lbl">Win Rate</span>
+            <span id="day-audit-stat-winrate" class="val">0%</span>
+          </div>
+          <div class="day-audit-metric-pill">
+            <span class="lbl">Process Rules</span>
+            <span id="day-audit-stat-compliance" class="val">0%</span>
+          </div>
+          <div class="day-audit-metric-pill">
+            <span class="lbl">Violations</span>
+            <span id="day-audit-stat-violations" class="val">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1. Executed Trades Section -->
+      <div class="day-audit-section-title">
+        <span>Executed Trades</span>
+        <span id="day-audit-trades-count-badge" class="badge-source-personal">0 Trades</span>
+      </div>
+      <div id="day-audit-trades-container" style="overflow-x: auto; margin-bottom: 1.25rem;">
+        <!-- Populated via JS -->
+      </div>
+
+      <!-- 2. Pre-Entry Plans Section -->
+      <div class="day-audit-section-title">
+        <span>Pre-Entry Plans</span>
+        <span id="day-audit-plans-count-badge" class="badge-source-personal">0 Plans</span>
+      </div>
+      <div id="day-audit-plans-container" style="display: grid; gap: 0.5rem; margin-bottom: 1.25rem;">
+        <!-- Populated via JS -->
+      </div>
+
+      <!-- 3. Missed Setups & Discipline Passes -->
+      <div class="day-audit-section-title">
+        <span>Missed Setups &amp; Deliberate Passes</span>
+        <span id="day-audit-missed-count-badge" class="badge-source-personal">0 Missed</span>
+      </div>
+      <div id="day-audit-missed-container" style="display: grid; gap: 0.5rem; margin-bottom: 1.25rem;">
+        <!-- Populated via JS -->
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+        <button id="btn-close-day-audit-bottom" class="btn btn-secondary">Close Audit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rapid Broker Order Text Parser / Quick Ingest Box Modal -->
+  <div id="quick-ingest-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 960px; width: 95vw; max-height: 94vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="margin-bottom: 0.75rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">RAPID INGEST</span>
+            <h2 style="margin: 0; font-size: 1.3rem;">Broker Order Text Parser &amp; Quick Ingest</h2>
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted); margin-top: 0.2rem;">
+            Paste raw fills or roundtrip order text from Tradovate, NinjaTrader, Interactive Brokers, MT4/MT5, Thinkorswim, or TradingView.
+          </div>
+        </div>
+        <button id="btn-close-quick-ingest" class="close-btn">&times;</button>
+      </div>
+
+      <div style="flex: 1; overflow-y: auto; padding-right: 0.25rem;">
+        <!-- Supported Broker Badges & Sample Loaders -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+            <span style="font-size: 0.75rem; color: var(--ink-secondary); font-weight: 600;">Supported:</span>
+            <span class="quick-ingest-chip">Tradovate / NinjaTrader</span>
+            <span class="quick-ingest-chip">Interactive Brokers</span>
+            <span class="quick-ingest-chip">MetaTrader 4 / 5</span>
+            <span class="quick-ingest-chip">Thinkorswim</span>
+            <span class="quick-ingest-chip">TradingView</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+            <span style="font-size: 0.75rem; color: var(--ink-secondary);">Load sample:</span>
+            <button class="quick-ingest-sample-btn" data-sample="tradovate">Tradovate NQ</button>
+            <button class="quick-ingest-sample-btn" data-sample="ibkr">IBKR NVDA</button>
+            <button class="quick-ingest-sample-btn" data-sample="mt5">MT5 EURUSD</button>
+            <button class="quick-ingest-sample-btn" data-sample="tos">TOS ES</button>
+          </div>
+        </div>
+
+        <!-- Raw Textarea Input -->
+        <textarea id="quick-ingest-textarea" class="quick-ingest-textarea" placeholder="Paste raw fills or trade confirmations here...
+Examples:
+  Tradovate: 2026-09-22 09:35:10 Bought 2 NQU6 @ 19850.50 | 09:55:00 Sold 2 NQU6 @ 19905.00
+  IBKR: 2026-09-22 10:00:15 BOT 100 NVDA @ 125.50 Com: 1.00 | 11:15:30 SLD 100 NVDA @ 129.00
+  MetaTrader: 2026.09.22 08:30:00 buy 1.00 EURUSD 1.08500 sl: 1.08250 tp: 1.09200
+  Summary: Bought 1 ES @ 5600.00, Sold @ 5625.50 (SL: 5585.00, TP: 5635.00)"></textarea>
+
+        <!-- Live Feedback Bar -->
+        <div id="quick-ingest-feedback-bar" class="quick-ingest-live-bar">
+          <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            <div>
+              <span style="font-size: 0.72rem; color: var(--ink-muted);">Format:</span>
+              <span id="quick-ingest-detected-broker" class="rubber-stamp stamp-neutral" style="font-size: 0.68rem; margin-left: 0.25rem;">AWAITING INPUT</span>
+            </div>
+            <div>
+              <span style="font-size: 0.72rem; color: var(--ink-muted);">Detected Fills:</span>
+              <strong id="quick-ingest-fills-count" style="font-family: var(--font-mono); font-size: 0.85rem; margin-left: 0.25rem;">0</strong>
+            </div>
+            <div>
+              <span style="font-size: 0.72rem; color: var(--ink-muted);">Matched Trades:</span>
+              <strong id="quick-ingest-trades-count" style="font-family: var(--font-mono); font-size: 0.85rem; margin-left: 0.25rem; color: var(--ledger-profit);">0</strong>
+            </div>
+            <div>
+              <span style="font-size: 0.72rem; color: var(--ink-muted);">Provenance:</span>
+              <span class="badge-source-verified" style="font-size: 0.68rem; margin-left: 0.25rem;">BROKER IMPORT</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button id="btn-quick-ingest-clear" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">Clear</button>
+            <button id="btn-quick-ingest-approve-all" class="btn btn-primary btn-sm" style="font-size: 0.75rem;" disabled>✓ Approve &amp; Log to Journal</button>
+          </div>
+        </div>
+
+        <!-- Warning Alert Box -->
+        <div id="quick-ingest-warning-box" style="display: none; margin-top: 0.75rem; padding: 0.6rem 0.85rem; background: #FFF3CD; border: 1px solid #FFEBAA; border-radius: var(--radius-sm); font-size: 0.8rem; color: #856404;">
+          <!-- Warnings populated via JS -->
+        </div>
+
+        <!-- Parsed Draft Trades Preview Table -->
+        <div id="quick-ingest-drafts-card" class="quick-ingest-draft-card" style="display: none;">
+          <div class="quick-ingest-draft-header">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <strong style="font-family: var(--font-serif); font-size: 0.95rem;">Draft Trades Preview</strong>
+              <span id="quick-ingest-preview-badge" class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">READY TO JOURNAL</span>
+            </div>
+            <span style="font-size: 0.75rem; color: var(--ink-muted);">Review fills, calculated P&amp;L, fees, and session before logging</span>
+          </div>
+          <div style="overflow-x: auto;">
+            <table class="weekly-matrix-table" style="margin: 0;">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th>Qty</th>
+                  <th>Entry Time</th>
+                  <th>Session</th>
+                  <th>Entry → Exit</th>
+                  <th>Fees</th>
+                  <th>Net P&amp;L</th>
+                  <th>R</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="quick-ingest-drafts-tbody">
+                <!-- Rows populated via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 0.5rem; border-top: 1px solid var(--ledger-paper-border);">
+        <span style="font-size: 0.72rem; color: var(--ink-muted); font-style: italic;">
+          🔒 Ledger &amp; Wick provenance engine: Imported broker executions are strictly tagged as VERIFIED BROKER IMPORT.
+        </span>
+        <button id="btn-quick-ingest-cancel" class="btn btn-secondary btn-sm">Close</button>
+      </div>
     </div>
   </div>
 

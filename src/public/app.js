@@ -82,6 +82,22 @@ import {
   calculateUncertaintyMetrics,
   calculateRegimeBreakdown
 } from '../engine/research-lab.js';
+import {
+  SESSION_BLOCKS,
+  SESSION_ORDER,
+  DAYS_OF_WEEK,
+  classifySessionBlock,
+  formatDateKey,
+  buildMonthlyCalendar,
+  buildWeeklyMatrix,
+  generateSessionHeatmap,
+  buildDayAudit
+} from '../engine/calendar-heatmap.js';
+import {
+  parseBrokerOrderText,
+  SUPPORTED_BROKERS,
+  inferAssetClassFromSymbol
+} from '../engine/broker-parser.js';
 
 // Application State
 let trades = [];
@@ -93,6 +109,9 @@ let preSessionLogs = [];
 let preEntryPlans = [];
 let missedSetups = [];
 let activePreEntryPlanId = null;
+let currentCalendarYear = new Date().getUTCFullYear();
+let currentCalendarMonth = new Date().getUTCMonth();
+let currentCalendarTab = 'month';
 let annotatingTrade = null;
 let activeTradeDropzoneSlot = 'before';
 let currentLightboxData = {
@@ -427,11 +446,13 @@ async function initApp() {
   setupContract();
   setupAnnotator();
   setupVisualScreenshotIngestion();
+  setupCalendarView();
   setupPropFirm();
   setupPlaybook();
   setupTradingPlan();
   setupSessionSystem();
   setupResearchLab();
+  setupQuickIngestBox();
 
   const storedSession = loadSessionState(window.localStorage);
   if (storedSession && isSessionActive(storedSession)) {
@@ -525,6 +546,7 @@ function refreshAllViews() {
   renderSessionStandDownBanner();
   renderPendingPreEntryPlans();
   renderMissedSetupsSummary();
+  renderCalendarView();
 }
 
 /**
@@ -2458,6 +2480,8 @@ function setupNavigation() {
         renderMonteCarloSimulation();
       } else if (targetView === 'gallery-view') {
         renderGallery();
+      } else if (targetView === 'calendar-view') {
+        renderCalendarView();
       }
     });
   });
@@ -4165,4 +4189,971 @@ function setupResearchLab() {
   populateLabPresetForm('TREND_PULLBACK_CONFLUENCE');
   runLabAudit(false);
 }
+
+/**
+ * ==========================================================================
+ * 23. Archival Calendar & Session Heatmap Controller
+ * ==========================================================================
+ */
+
+function setupCalendarView() {
+  const prevBtn = document.getElementById('cal-btn-prev-month');
+  const nextBtn = document.getElementById('cal-btn-next-month');
+  const todayBtn = document.getElementById('cal-btn-today');
+  const sourceFilter = document.getElementById('cal-filter-source');
+
+  prevBtn?.addEventListener('click', () => {
+    currentCalendarMonth--;
+    if (currentCalendarMonth < 0) {
+      currentCalendarMonth = 11;
+      currentCalendarYear--;
+    }
+    renderCalendarView();
+  });
+
+  nextBtn?.addEventListener('click', () => {
+    currentCalendarMonth++;
+    if (currentCalendarMonth > 11) {
+      currentCalendarMonth = 0;
+      currentCalendarYear++;
+    }
+    renderCalendarView();
+  });
+
+  todayBtn?.addEventListener('click', () => {
+    const now = new Date();
+    currentCalendarYear = now.getUTCFullYear();
+    currentCalendarMonth = now.getUTCMonth();
+    renderCalendarView();
+  });
+
+  sourceFilter?.addEventListener('change', () => {
+    renderCalendarView();
+  });
+
+  // Subnavigation tabs (Month, Week, Heatmap)
+  const tabMonth = document.getElementById('cal-subnav-month');
+  const tabWeek = document.getElementById('cal-subnav-week');
+  const tabHeatmap = document.getElementById('cal-subnav-heatmap');
+
+  const contentMonth = document.getElementById('cal-tab-month');
+  const contentWeek = document.getElementById('cal-tab-week');
+  const contentHeatmap = document.getElementById('cal-tab-heatmap');
+
+  const setCalendarTab = (tabName) => {
+    currentCalendarTab = tabName;
+    [tabMonth, tabWeek, tabHeatmap].forEach(b => b?.classList.remove('active'));
+    if (tabName === 'month') {
+      tabMonth?.classList.add('active');
+      if (contentMonth) contentMonth.style.display = 'block';
+      if (contentWeek) contentWeek.style.display = 'none';
+      if (contentHeatmap) contentHeatmap.style.display = 'none';
+    } else if (tabName === 'week') {
+      tabWeek?.classList.add('active');
+      if (contentMonth) contentMonth.style.display = 'none';
+      if (contentWeek) contentWeek.style.display = 'block';
+      if (contentHeatmap) contentHeatmap.style.display = 'none';
+    } else if (tabName === 'heatmap') {
+      tabHeatmap?.classList.add('active');
+      if (contentMonth) contentMonth.style.display = 'none';
+      if (contentWeek) contentWeek.style.display = 'none';
+      if (contentHeatmap) contentHeatmap.style.display = 'block';
+    }
+    renderCalendarView();
+  };
+
+  tabMonth?.addEventListener('click', () => setCalendarTab('month'));
+  tabWeek?.addEventListener('click', () => setCalendarTab('week'));
+  tabHeatmap?.addEventListener('click', () => setCalendarTab('heatmap'));
+
+  // Day Audit modal close bindings
+  const dayAuditModal = document.getElementById('day-audit-modal');
+  const closeDayAudit = () => dayAuditModal?.classList.remove('open');
+  document.getElementById('btn-close-day-audit')?.addEventListener('click', closeDayAudit);
+  document.getElementById('btn-close-day-audit-bottom')?.addEventListener('click', closeDayAudit);
+  dayAuditModal?.addEventListener('click', (e) => {
+    if (e.target === dayAuditModal) closeDayAudit();
+  });
+}
+
+function getCalendarTrades() {
+  const sourceFilter = document.getElementById('cal-filter-source')?.value || 'VERIFIED';
+  if (sourceFilter === 'ALL') {
+    const existingIds = new Set(trades.map(t => t.id));
+    const extraSamples = (sampleTrades || []).filter(st => !existingIds.has(st.id));
+    return [...trades, ...extraSamples];
+  }
+  return getPerformanceTrades();
+}
+
+function renderCalendarView() {
+  const activeTrades = getCalendarTrades();
+  const excludeSample = document.getElementById('cal-filter-source')?.value !== 'ALL';
+
+  const calData = buildMonthlyCalendar(
+    currentCalendarYear,
+    currentCalendarMonth,
+    activeTrades,
+    preEntryPlans,
+    missedSetups,
+    { excludeSample }
+  );
+
+  // Month label
+  const labelEl = document.getElementById('cal-current-month-label');
+  if (labelEl) {
+    labelEl.textContent = `${calData.monthName} ${calData.year}`;
+  }
+
+  // Summary Ribbon
+  const summ = calData.summary;
+  const pnlEl = document.getElementById('cal-stat-pnl');
+  if (pnlEl) {
+    pnlEl.textContent = `${summ.monthNetPnL >= 0 ? '+' : '-'}$${Math.abs(summ.monthNetPnL).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    pnlEl.style.color = summ.monthNetPnL > 0 ? 'var(--ledger-profit)' : (summ.monthNetPnL < 0 ? 'var(--ledger-loss)' : 'var(--ink-primary)');
+  }
+  const pfEl = document.getElementById('cal-stat-pf');
+  if (pfEl) {
+    pfEl.textContent = `Profit Factor: ${summ.monthProfitFactor > 0 ? summ.monthProfitFactor.toFixed(2) : '--'}`;
+  }
+
+  const dayWrEl = document.getElementById('cal-stat-day-winrate');
+  if (dayWrEl) {
+    dayWrEl.textContent = `${summ.dayWinRate.toFixed(1)}%`;
+  }
+  const dayCountsEl = document.getElementById('cal-stat-day-counts');
+  if (dayCountsEl) {
+    dayCountsEl.textContent = `${summ.profitableDaysCount} Green / ${summ.losingDaysCount} Red (${summ.tradingDaysCount} Trading Days)`;
+  }
+
+  const tradeWrEl = document.getElementById('cal-stat-trade-winrate');
+  if (tradeWrEl) {
+    tradeWrEl.textContent = `${summ.monthWinRate.toFixed(1)}%`;
+  }
+  const tradeCiEl = document.getElementById('cal-stat-trade-ci');
+  if (tradeCiEl && summ.monthWinRateCI) {
+    tradeCiEl.textContent = `95% CI: [${summ.monthWinRateCI.formatted}]`;
+  }
+
+  const compEl = document.getElementById('cal-stat-compliance');
+  if (compEl) {
+    compEl.textContent = `${summ.monthComplianceRate.toFixed(1)}%`;
+  }
+  const compCiEl = document.getElementById('cal-stat-compliance-ci');
+  if (compCiEl && summ.monthComplianceCI) {
+    compCiEl.textContent = `95% CI: [${summ.monthComplianceCI.formatted}]`;
+  }
+
+  const visEl = document.getElementById('cal-stat-visuals');
+  if (visEl) {
+    visEl.textContent = `${summ.monthVisualCoverageRate.toFixed(1)}%`;
+  }
+  const visSubEl = document.getElementById('cal-stat-visuals-sub');
+  if (visSubEl) {
+    visSubEl.textContent = `${summ.monthTradesWithVisuals} / ${summ.totalTrades} trades documented`;
+  }
+
+  const totalREl = document.getElementById('cal-stat-total-r');
+  if (totalREl) {
+    totalREl.textContent = `${summ.monthTotalR >= 0 ? '+' : ''}${summ.monthTotalR.toFixed(1)}R`;
+  }
+  const plansMissedEl = document.getElementById('cal-stat-plans-missed');
+  if (plansMissedEl) {
+    plansMissedEl.textContent = `${summ.totalPlans} Plans / ${summ.totalDisciplineWins} Restraints`;
+  }
+
+  // Render Active Sub-View
+  if (currentCalendarTab === 'month') {
+    renderMonthlyGrid(calData);
+  } else if (currentCalendarTab === 'week') {
+    renderWeeklyTable(currentCalendarYear, currentCalendarMonth, activeTrades, excludeSample);
+  } else if (currentCalendarTab === 'heatmap') {
+    renderSessionHeatmapView(activeTrades, excludeSample);
+  }
+}
+
+function renderMonthlyGrid(calData) {
+  const gridContainer = document.getElementById('cal-month-grid');
+  if (!gridContainer) return;
+  gridContainer.innerHTML = '';
+
+  calData.weeks.forEach(week => {
+    week.days.forEach(day => {
+      const cell = document.createElement('div');
+      cell.className = 'cal-day-cell';
+      if (!day.isCurrentMonth) cell.classList.add('other-month');
+      if (day.isToday) cell.classList.add('is-today');
+
+      const act = day.activity;
+      if (act && act.totalTrades > 0) {
+        if (act.status === 'PROFITABLE') cell.classList.add('profitable');
+        else if (act.status === 'LOSS') cell.classList.add('loss');
+        else if (act.status === 'BREAKEVEN') cell.classList.add('breakeven');
+      }
+
+      // Badges (screenshots, pre-entry plans, missed setups)
+      let badgesHtml = '';
+      if (act && act.hasVisualEvidence) badgesHtml += `<span title="${act.screenshotCount} charts recorded">📷</span>`;
+      if (act && act.plansCount > 0) badgesHtml += `<span title="${act.plansCount} pre-entry plans recorded">📝</span>`;
+      if (act && act.missedCount > 0) badgesHtml += `<span title="${act.disciplineWins} discipline restraint wins">🎯</span>`;
+
+      // Body (Net P&L and R-Multiple)
+      let bodyHtml = '';
+      if (act && act.totalTrades > 0) {
+        const pnlClass = act.netPnL > 0 ? 'positive' : (act.netPnL < 0 ? 'negative' : 'neutral');
+        const pnlPrefix = act.netPnL > 0 ? '+' : '';
+        bodyHtml = `
+          <div class="cal-cell-pnl ${pnlClass}">
+            ${pnlPrefix}$${Math.abs(act.netPnL).toFixed(2)}
+          </div>
+          <div class="cal-cell-r">${act.totalR >= 0 ? '+' : ''}${act.totalR.toFixed(1)}R</div>
+        `;
+      } else if (act && (act.plansCount > 0 || act.missedCount > 0)) {
+        bodyHtml = `
+          <div style="font-size: 0.72rem; color: var(--ink-secondary); font-style: italic;">
+            ${act.plansCount > 0 ? 'Plan Logged' : 'Pass Recorded'}
+          </div>
+        `;
+      }
+
+      // Footer: trade count, session dots, compliance badge
+      let footerHtml = '';
+      if (act && act.totalTrades > 0) {
+        const ruleClean = act.violationCount === 0;
+        const ruleLabel = ruleClean ? '100% Rules' : `${act.violationCount} Viol. ⚠️`;
+        const ruleClass = ruleClean ? 'clean' : 'violated';
+
+        let dotsHtml = '';
+        if (act.sessions.LONDON.count > 0) dotsHtml += `<span class="cal-session-dot" style="background: #4A6984;" title="London Morning"></span>`;
+        if (act.sessions.NEW_YORK_AM.count > 0) dotsHtml += `<span class="cal-session-dot" style="background: #8A5A2B;" title="New York AM"></span>`;
+        if (act.sessions.NEW_YORK_PM.count > 0) dotsHtml += `<span class="cal-session-dot" style="background: #68452B;" title="New York PM"></span>`;
+        if (act.sessions.ASIAN.count > 0) dotsHtml += `<span class="cal-session-dot" style="background: #3A6073;" title="Asian"></span>`;
+        if (act.sessions.OVERNIGHT.count > 0) dotsHtml += `<span class="cal-session-dot" style="background: #4A4A4A;" title="Overnight"></span>`;
+
+        footerHtml = `
+          <div class="cal-cell-footer">
+            <span class="cal-cell-trades-badge">${act.totalTrades}t</span>
+            <div class="cal-session-dots">${dotsHtml}</div>
+            <span class="cal-cell-rule-badge ${ruleClass}">${ruleLabel}</span>
+          </div>
+        `;
+      }
+
+      cell.innerHTML = `
+        <div class="cal-cell-header">
+          <span class="cal-cell-number">${day.dayNumber}</span>
+          <div class="cal-cell-badges">${badgesHtml}</div>
+        </div>
+        <div class="cal-cell-body">${bodyHtml}</div>
+        ${footerHtml}
+      `;
+
+      cell.addEventListener('click', () => {
+        openDayAuditModal(day.dateKey);
+      });
+
+      gridContainer.appendChild(cell);
+    });
+  });
+}
+
+function renderWeeklyTable(year, monthIndex, activeTrades, excludeSample) {
+  const tbody = document.getElementById('cal-week-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const weeklyData = buildWeeklyMatrix(year, monthIndex, activeTrades, preEntryPlans, missedSetups, { excludeSample });
+
+  weeklyData.weeks.forEach(w => {
+    const tr = document.createElement('tr');
+    const pnlPrefix = w.weekNetPnL > 0 ? '+' : '';
+    const pnlColor = w.weekNetPnL > 0 ? 'var(--ledger-profit)' : (w.weekNetPnL < 0 ? 'var(--ledger-loss)' : 'var(--ink-muted)');
+
+    let statusStamp = '<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">NO ACTIVITY</span>';
+    if (w.status === 'PROFITABLE') statusStamp = '<span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">PROFITABLE</span>';
+    else if (w.status === 'LOSS') statusStamp = '<span class="rubber-stamp stamp-danger" style="font-size: 0.65rem;">DRAWDOWN</span>';
+    else if (w.status === 'BREAKEVEN') statusStamp = '<span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">BREAKEVEN</span>';
+
+    tr.innerHTML = `
+      <td><strong>Week ${w.weekNumber}</strong></td>
+      <td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-secondary);">${w.startDate} → ${w.endDate}</td>
+      <td style="font-family: var(--font-mono); font-weight: 700;">${w.weekTrades}</td>
+      <td style="font-family: var(--font-mono); font-weight: 700; color: ${pnlColor};">${w.weekTrades > 0 ? `${pnlPrefix}$${Math.abs(w.weekNetPnL).toFixed(2)}` : '--'}</td>
+      <td style="font-family: var(--font-mono);">${w.weekTrades > 0 ? `${w.weekWinRate.toFixed(1)}%` : '--'}</td>
+      <td>
+        <span class="rubber-stamp ${w.weekComplianceRate >= 80 ? 'stamp-clean' : 'stamp-neutral'}" style="font-size: 0.65rem;">
+          ${w.weekTrades > 0 ? `${w.weekComplianceRate.toFixed(1)}%` : '--'}
+        </span>
+      </td>
+      <td style="font-family: var(--font-mono);">${w.weekTrades > 0 ? `${w.weekTotalR >= 0 ? '+' : ''}${w.weekTotalR.toFixed(1)}R` : '--'}</td>
+      <td style="font-size: 0.8rem; color: var(--ink-secondary);">${w.weekPlans} Plans / ${w.weekMissed} Passes</td>
+      <td>${statusStamp}</td>
+    `;
+
+    tr.addEventListener('click', () => {
+      const tradingDay = w.days.find(d => d.activity && d.activity.totalTrades > 0) || w.days[0];
+      if (tradingDay) openDayAuditModal(tradingDay.dateKey);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderSessionHeatmapView(activeTrades, excludeSample) {
+  const heatmapData = generateSessionHeatmap(activeTrades, { excludeSample });
+
+  // 1. Cross-Matrix Table
+  const tableContainer = document.getElementById('cal-heatmap-table-container');
+  if (tableContainer) {
+    let theadCols = '<th>Session Block</th>';
+    DAYS_OF_WEEK.slice(0, 5).forEach(day => {
+      theadCols += `<th>${day.short}</th>`;
+    });
+
+    let tbodyRows = '';
+    SESSION_ORDER.forEach(sessId => {
+      const sessMeta = SESSION_BLOCKS[sessId];
+      let rowHtml = `
+        <tr>
+          <td class="heatmap-session-label">
+            <span>${sessMeta.icon}</span>
+            <span>${sessMeta.label}</span>
+          </td>
+      `;
+
+      DAYS_OF_WEEK.slice(0, 5).forEach(day => {
+        const cellData = heatmapData.matrix[sessId][day.key];
+        let cellClass = 'empty';
+        if (cellData.tradeCount > 0) {
+          if (cellData.netPnL > 0) {
+            cellClass = cellData.intensity > 0.6 ? 'profit-high' : (cellData.intensity > 0.25 ? 'profit-med' : 'profit-low');
+          } else if (cellData.netPnL < 0) {
+            cellClass = cellData.intensity < -0.6 ? 'loss-high' : (cellData.intensity < -0.25 ? 'loss-med' : 'loss-low');
+          } else {
+            cellClass = 'profit-low';
+          }
+        }
+
+        const pnlText = cellData.tradeCount > 0
+          ? `${cellData.netPnL >= 0 ? '+' : ''}$${Math.abs(cellData.netPnL).toFixed(0)}`
+          : '--';
+        const metaText = cellData.tradeCount > 0
+          ? `${cellData.tradeCount}t • ${cellData.winRate.toFixed(0)}%W`
+          : '0 trades';
+
+        rowHtml += `
+          <td>
+            <div class="heatmap-cell ${cellClass}" title="${sessMeta.label} on ${day.label}: ${pnlText} across ${cellData.tradeCount} trades (${cellData.complianceRate}% rule adherence)">
+              <span class="heatmap-cell-val">${pnlText}</span>
+              <span class="heatmap-cell-meta">${metaText}</span>
+            </div>
+          </td>
+        `;
+      });
+
+      rowHtml += '</tr>';
+      tbodyRows += rowHtml;
+    });
+
+    tableContainer.innerHTML = `
+      <table class="heatmap-table">
+        <thead><tr>${theadCols}</tr></thead>
+        <tbody>${tbodyRows}</tbody>
+      </table>
+    `;
+  }
+
+  // 2. Session Summary Cards
+  const cardsContainer = document.getElementById('cal-session-cards-container');
+  if (cardsContainer) {
+    cardsContainer.innerHTML = '';
+    const classMap = {
+      LONDON: 'london',
+      NEW_YORK_AM: 'ny-am',
+      NEW_YORK_PM: 'ny-pm',
+      ASIAN: 'asian',
+      OVERNIGHT: 'overnight'
+    };
+
+    SESSION_ORDER.forEach(sessId => {
+      const s = heatmapData.sessions[sessId];
+      const pnlPrefix = s.netPnL > 0 ? '+' : '';
+      const pnlColor = s.netPnL > 0 ? 'var(--ledger-profit)' : (s.netPnL < 0 ? 'var(--ledger-loss)' : 'var(--ink-muted)');
+
+      const card = document.createElement('div');
+      card.className = `session-stat-card ${classMap[sessId] || 'london'}`;
+      card.innerHTML = `
+        <div class="session-stat-header">
+          <div>
+            <span style="font-size: 1.1rem; margin-right: 0.3rem;">${s.icon}</span>
+            <strong class="session-stat-title">${s.label}</strong>
+          </div>
+          <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-muted);">${s.timeRange}</span>
+        </div>
+        <div class="session-stat-rows">
+          <div class="session-stat-row">
+            <span>Cumulative P&amp;L</span>
+            <strong style="color: ${pnlColor}; font-size: 1rem;">${s.totalTrades > 0 ? `${pnlPrefix}$${s.netPnL.toFixed(2)}` : '$0.00'}</strong>
+          </div>
+          <div class="session-stat-row">
+            <span>Activity Volume</span>
+            <strong>${s.totalTrades} trades (${s.tradeSharePercent}% volume)</strong>
+          </div>
+          <div class="session-stat-row">
+            <span>Win Rate</span>
+            <strong>${s.winRate.toFixed(1)}% ${s.winRateCI ? `[${s.winRateCI.formatted}]` : ''}</strong>
+          </div>
+          <div class="session-stat-row">
+            <span>Rule Compliance</span>
+            <strong style="color: var(--ledger-profit);">${s.complianceRate.toFixed(1)}% ${s.complianceCI ? `[${s.complianceCI.formatted}]` : ''}</strong>
+          </div>
+          <div class="session-stat-row">
+            <span>Realized Return</span>
+            <strong>${s.totalR >= 0 ? '+' : ''}${s.totalR.toFixed(1)}R (${s.avgPnLPerTrade >= 0 ? '+' : ''}$${s.avgPnLPerTrade.toFixed(2)}/trade)</strong>
+          </div>
+          <div class="session-stat-row">
+            <span>Profit Factor</span>
+            <strong>${s.profitFactor > 0 ? s.profitFactor.toFixed(2) : '--'}</strong>
+          </div>
+        </div>
+      `;
+      cardsContainer.appendChild(card);
+    });
+  }
+
+  // 3. Empirical Observations
+  const obsContainer = document.getElementById('cal-session-observations-list');
+  if (obsContainer) {
+    if (heatmapData.observations.length === 0) {
+      obsContainer.innerHTML = '<div style="font-style: italic; color: var(--ink-secondary);">No empirical session observations recorded yet. Log trades across market sessions to build retrospective insights.</div>';
+    } else {
+      obsContainer.innerHTML = heatmapData.observations.map(o => `
+        <div style="background: #FFF; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+            <strong style="font-family: var(--font-serif); color: var(--ink-primary);">${o.headline}</strong>
+            <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-muted);">Sample n = ${o.sampleSize}</span>
+          </div>
+          <p style="margin: 0; font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.4;">${o.text}</p>
+        </div>
+      `).join('');
+    }
+  }
+}
+
+function openDayAuditModal(dateKey) {
+  const modal = document.getElementById('day-audit-modal');
+  if (!modal) return;
+
+  const activeTrades = getCalendarTrades();
+  const excludeSample = document.getElementById('cal-filter-source')?.value !== 'ALL';
+  const audit = buildDayAudit(dateKey, activeTrades, preEntryPlans, missedSetups, { excludeSample });
+
+  // 1. Header & Title
+  const titleEl = document.getElementById('day-audit-date-title');
+  const subEl = document.getElementById('day-audit-date-subtitle');
+  const badgeEl = document.getElementById('day-audit-badge');
+
+  if (titleEl) titleEl.textContent = `${audit.dayName}, ${audit.dateKey}`;
+  if (subEl) subEl.textContent = `Retrospective Day Audit • ${audit.summary.totalTrades} Executed Trades`;
+
+  if (badgeEl) {
+    if (audit.summary.status === 'PROFITABLE') {
+      badgeEl.className = 'rubber-stamp stamp-clean';
+      badgeEl.textContent = 'PROFITABLE DAY ✓';
+    } else if (audit.summary.status === 'LOSS') {
+      badgeEl.className = 'rubber-stamp stamp-danger';
+      badgeEl.textContent = 'DRAWDOWN DAY';
+    } else {
+      badgeEl.className = 'rubber-stamp stamp-neutral';
+      badgeEl.textContent = 'STAND-DOWN / NEUTRAL';
+    }
+  }
+
+  // 2. Day Summary Hero
+  const pnlHead = document.getElementById('day-audit-pnl-headline');
+  const rHead = document.getElementById('day-audit-r-headline');
+  if (pnlHead) {
+    const pnl = audit.summary.netPnL;
+    pnlHead.textContent = `${pnl >= 0 ? '+' : '-'}$${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    pnlHead.style.color = pnl > 0 ? 'var(--ledger-profit)' : (pnl < 0 ? 'var(--ledger-loss)' : 'var(--ink-primary)');
+  }
+  if (rHead) {
+    rHead.textContent = `${audit.summary.totalR >= 0 ? '+' : ''}${audit.summary.totalR.toFixed(2)}R realized net across ${audit.summary.totalTrades} executions`;
+  }
+
+  const statTrades = document.getElementById('day-audit-stat-trades');
+  const statWinrate = document.getElementById('day-audit-stat-winrate');
+  const statCompliance = document.getElementById('day-audit-stat-compliance');
+  const statViolations = document.getElementById('day-audit-stat-violations');
+
+  if (statTrades) statTrades.textContent = audit.summary.totalTrades;
+  if (statWinrate) statWinrate.textContent = `${audit.summary.winRate.toFixed(1)}% (${audit.summary.wins}W / ${audit.summary.losses}L)`;
+  if (statCompliance) statCompliance.textContent = `${audit.summary.complianceRate.toFixed(1)}%`;
+  if (statViolations) {
+    statViolations.textContent = audit.summary.violations;
+    statViolations.style.color = audit.summary.violations > 0 ? 'var(--ledger-loss)' : 'var(--ledger-profit)';
+  }
+
+  // 3. Executed Trades Table
+  const tradesContainer = document.getElementById('day-audit-trades-container');
+  const tradesBadge = document.getElementById('day-audit-trades-count-badge');
+  if (tradesBadge) tradesBadge.textContent = `${audit.trades.length} Trades`;
+
+  if (tradesContainer) {
+    if (audit.trades.length === 0) {
+      tradesContainer.innerHTML = '<div style="font-style: italic; color: var(--ink-secondary); padding: 0.75rem 0;">No executed trades logged on this calendar day.</div>';
+    } else {
+      let rows = '';
+      audit.trades.forEach(t => {
+        const pnl = Number(t.netPnL || 0);
+        const pnlColor = pnl > 0 ? 'var(--ledger-profit)' : (pnl < 0 ? 'var(--ledger-loss)' : 'var(--ink-muted)');
+        const sess = classifySessionBlock(t);
+        const hasChart = !!(t.hasVisualEvidence || t.screenshotUrl || t.preEntryScreenshotUrl || t.outcomeScreenshotUrl);
+        const isCompliant = !Array.isArray(t.violations) || t.violations.length === 0;
+
+        rows += `
+          <tr>
+            <td><strong>${t.symbol || '--'}</strong></td>
+            <td><span class="badge-source-${(t.direction || 'LONG').toLowerCase()}">${t.direction || 'LONG'}</span></td>
+            <td style="font-size: 0.8rem; font-family: var(--font-mono); color: var(--ink-secondary);">${t.entryDate ? t.entryDate.slice(11, 16) : '--'}</td>
+            <td><span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">${sess.icon} ${sess.shortLabel}</span></td>
+            <td style="font-family: var(--font-mono);">${Number(t.entryPrice || 0).toFixed(2)} → ${Number(t.exitPrice || 0).toFixed(2)}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: ${pnlColor};">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
+            <td style="font-family: var(--font-mono);">${Number(t.rMultiple || 0) >= 0 ? '+' : ''}${Number(t.rMultiple || 0).toFixed(2)}R</td>
+            <td>
+              <span class="rubber-stamp ${isCompliant ? 'stamp-clean' : 'stamp-danger'}" style="font-size: 0.65rem;">
+                ${isCompliant ? 'RULE COMPLIANT' : (t.violations.join(', ') || 'NON-COMPLIANT')}
+              </span>
+            </td>
+            <td>
+              ${hasChart ? `<button class="btn btn-secondary btn-sm cal-btn-view-chart" data-trade-id="${t.id}" style="font-size: 0.72rem; padding: 0.15rem 0.45rem;">📷 Chart</button>` : '<span style="color: var(--ink-muted); font-size: 0.75rem;">--</span>'}
+            </td>
+          </tr>
+        `;
+      });
+
+      tradesContainer.innerHTML = `
+        <table class="weekly-matrix-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Time</th>
+              <th>Session</th>
+              <th>Fills</th>
+              <th>Net P&amp;L</th>
+              <th>R</th>
+              <th>Compliance</th>
+              <th>Visual</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+
+      tradesContainer.querySelectorAll('.cal-btn-view-chart').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tradeId = btn.getAttribute('data-trade-id');
+          const t = audit.trades.find(x => x.id === tradeId);
+          if (!t) return;
+          const primary = t.outcomeScreenshotUrl || t.screenshotUrl || t.preEntryScreenshotUrl;
+          const secondary = t.preEntryScreenshotUrl && t.outcomeScreenshotUrl ? t.preEntryScreenshotUrl : null;
+          if (window.openLightbox && primary) {
+            window.openLightbox(primary, `${t.symbol} ${t.direction} Trade Execution`, `${t.entryDate || ''} • ${t.netPnL >= 0 ? '+' : ''}$${Number(t.netPnL || 0).toFixed(2)}`, secondary, t.notes || '');
+          }
+        });
+      });
+    }
+  }
+
+  // 4. Pre-Entry Plans Section
+  const plansContainer = document.getElementById('day-audit-plans-container');
+  const plansBadge = document.getElementById('day-audit-plans-count-badge');
+  if (plansBadge) plansBadge.textContent = `${audit.plans.length} Plans`;
+
+  if (plansContainer) {
+    if (audit.plans.length === 0) {
+      plansContainer.innerHTML = '<div style="font-style: italic; color: var(--ink-secondary); font-size: 0.85rem;">No pre-entry plans recorded for this date.</div>';
+    } else {
+      plansContainer.innerHTML = audit.plans.map(p => `
+        <div style="background: #FFF; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.4rem;">
+              <strong>${p.symbol}</strong>
+              <span class="badge-source-${(p.direction || 'LONG').toLowerCase()}">${p.direction || 'LONG'}</span>
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">${p.plannedAt ? p.plannedAt.slice(11, 16) : ''}</span>
+              <span class="rubber-stamp stamp-neutral" style="font-size: 0.6rem;">${p.status || 'PENDING'}</span>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--ink-secondary); margin-top: 0.2rem;">
+              Planned Entry: <strong>${p.entryPrice}</strong> | Stop: <strong>${p.stopLoss}</strong> | Target: <strong>${p.takeProfit || '--'}</strong> (R:R: ${p.plannedRR || '--'})
+            </div>
+            ${p.setupRationale ? `<div style="font-size: 0.78rem; color: var(--ink-muted); font-style: italic; margin-top: 0.15rem;">"${p.setupRationale}"</div>` : ''}
+          </div>
+          ${p.screenshotUrl ? `<button class="btn btn-secondary btn-sm cal-plan-chart-btn" data-url="${p.screenshotUrl}" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">📷 Setup Chart</button>` : ''}
+        </div>
+      `).join('');
+
+      plansContainer.querySelectorAll('.cal-plan-chart-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const url = btn.getAttribute('data-url');
+          if (window.openLightbox && url) {
+            window.openLightbox(url, 'Pre-Entry Setup Chart', 'Planned Context & Trigger Level', null, '');
+          }
+        });
+      });
+    }
+  }
+
+  // 5. Missed Setups / Deliberate Passes Section
+  const missedContainer = document.getElementById('day-audit-missed-container');
+  const missedBadge = document.getElementById('day-audit-missed-count-badge');
+  if (missedBadge) missedBadge.textContent = `${audit.missed.length} Passes`;
+
+  if (missedContainer) {
+    if (audit.missed.length === 0) {
+      missedContainer.innerHTML = '<div style="font-style: italic; color: var(--ink-secondary); font-size: 0.85rem;">No missed setups or intentional stand-downs logged on this date.</div>';
+    } else {
+      missedContainer.innerHTML = audit.missed.map(m => `
+        <div style="background: #FFF; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.4rem;">
+              <strong>${m.symbol}</strong>
+              <span class="badge-source-${(m.direction || 'LONG').toLowerCase()}">${m.direction || 'LONG'}</span>
+              <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-muted);">${m.loggedAt ? m.loggedAt.slice(11, 16) : ''}</span>
+              <span class="rubber-stamp ${m.isDisciplineWin ? 'stamp-clean' : 'stamp-neutral'}" style="font-size: 0.6rem;">
+                ${m.isDisciplineWin ? 'DISCIPLINE WIN ✓' : 'HESITATION'}
+              </span>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--ink-secondary); margin-top: 0.2rem;">
+              Reason: <strong>${m.reasonLabel || m.reasonCode || 'Discretionary Pass'}</strong>
+            </div>
+            ${m.reflection ? `<div style="font-size: 0.78rem; color: var(--ink-muted); font-style: italic; margin-top: 0.15rem;">"${m.reflection}"</div>` : ''}
+          </div>
+          ${m.screenshotUrl ? `<button class="btn btn-secondary btn-sm cal-missed-chart-btn" data-url="${m.screenshotUrl}" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">📷 Setup Chart</button>` : ''}
+        </div>
+      `).join('');
+
+      missedContainer.querySelectorAll('.cal-missed-chart-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const url = btn.getAttribute('data-url');
+          if (window.openLightbox && url) {
+            window.openLightbox(url, 'Missed Setup / Restraint Chart', 'Setup Context & Deliberate Pass Reason', null, '');
+          }
+        });
+      });
+    }
+  }
+
+  modal.classList.add('open');
+}
+
+/**
+ * 28. Rapid Broker Order Text Parser & Quick Ingest Box Handler
+ */
+function setupQuickIngestBox() {
+  const modal = document.getElementById('quick-ingest-modal');
+  const openBtn = document.getElementById('btn-open-quick-ingest');
+  const closeBtn = document.getElementById('btn-close-quick-ingest');
+  const cancelBtn = document.getElementById('btn-quick-ingest-cancel');
+  const clearBtn = document.getElementById('btn-quick-ingest-clear');
+  const approveAllBtn = document.getElementById('btn-quick-ingest-approve-all');
+  const textarea = document.getElementById('quick-ingest-textarea');
+  const brokerBadge = document.getElementById('quick-ingest-detected-broker');
+  const fillsCountEl = document.getElementById('quick-ingest-fills-count');
+  const tradesCountEl = document.getElementById('quick-ingest-trades-count');
+  const warningBox = document.getElementById('quick-ingest-warning-box');
+  const draftsCard = document.getElementById('quick-ingest-drafts-card');
+  const draftsTbody = document.getElementById('quick-ingest-drafts-tbody');
+  const sampleBtns = document.querySelectorAll('.quick-ingest-sample-btn');
+
+  if (!modal || !textarea) return;
+
+  const SAMPLES = {
+    tradovate: `2026-09-22 09:35:10 Bought 2 NQU6 @ 19850.50\n2026-09-22 09:55:00 Sold 2 NQU6 @ 19905.00`,
+    ibkr: `2026-09-22 10:00:15 BOT 100 NVDA @ 125.50 Com: 1.00\n2026-09-22 11:15:30 SLD 100 NVDA @ 129.00 Com: 1.00`,
+    mt5: `2026.09.22 08:30:00 buy 1.00 EURUSD 1.08500 sl: 1.08250 tp: 1.09200\n2026.09.22 10:45:00 close 1.00 EURUSD 1.08950`,
+    tos: `09/22/2026 09:40:00 BUY +1 /ES @5600.00\n09/22/2026 10:15:00 SELL -1 /ES @5625.50`
+  };
+
+  let currentParsedResult = null;
+  let debounceTimer = null;
+
+  const openModal = () => {
+    modal.classList.add('open');
+    textarea.focus();
+  };
+
+  const closeModal = () => {
+    modal.classList.remove('open');
+  };
+
+  if (openBtn) openBtn.addEventListener('click', openModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  // Clear button
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      textarea.value = '';
+      resetParsedView();
+    });
+  }
+
+  // Sample buttons
+  sampleBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sampleKey = btn.getAttribute('data-sample');
+      if (SAMPLES[sampleKey]) {
+        textarea.value = SAMPLES[sampleKey];
+        processInput();
+      }
+    });
+  });
+
+  const resetParsedView = () => {
+    currentParsedResult = null;
+    if (brokerBadge) {
+      brokerBadge.textContent = 'AWAITING INPUT';
+      brokerBadge.className = 'rubber-stamp stamp-neutral';
+    }
+    if (fillsCountEl) fillsCountEl.textContent = '0';
+    if (tradesCountEl) tradesCountEl.textContent = '0';
+    if (warningBox) {
+      warningBox.style.display = 'none';
+      warningBox.innerHTML = '';
+    }
+    if (draftsCard) draftsCard.style.display = 'none';
+    if (draftsTbody) draftsTbody.innerHTML = '';
+    if (approveAllBtn) {
+      approveAllBtn.disabled = true;
+      approveAllBtn.textContent = '✓ Approve & Log to Journal';
+    }
+  };
+
+  const processInput = () => {
+    const rawText = textarea.value.trim();
+    if (!rawText) {
+      resetParsedView();
+      return;
+    }
+
+    try {
+      currentParsedResult = parseBrokerOrderText(rawText);
+      renderParsedPreview(currentParsedResult);
+    } catch (err) {
+      console.error('Failed to parse broker order text:', err);
+      if (warningBox) {
+        warningBox.style.display = 'block';
+        warningBox.textContent = `Parser Error: ${err.message}`;
+      }
+    }
+  };
+
+  // Real-time input and paste listeners with debounce
+  textarea.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(processInput, 180);
+  });
+
+  textarea.addEventListener('paste', () => {
+    setTimeout(processInput, 50);
+  });
+
+  const renderParsedPreview = (result) => {
+    if (!result) return;
+
+    // 1. Update detected broker badge
+    if (brokerBadge) {
+      const brokerLabels = {
+        [SUPPORTED_BROKERS.TRADOVATE_NINJA]: 'TRADOVATE / NINJA',
+        [SUPPORTED_BROKERS.INTERACTIVE_BROKERS]: 'INTERACTIVE BROKERS',
+        [SUPPORTED_BROKERS.METATRADER]: 'METATRADER 4/5',
+        [SUPPORTED_BROKERS.THINKORSWIM]: 'THINKORSWIM',
+        [SUPPORTED_BROKERS.TRADINGVIEW]: 'TRADINGVIEW',
+        [SUPPORTED_BROKERS.GENERIC]: 'GENERIC ORDER SUMMARY'
+      };
+      const label = brokerLabels[result.detectedBroker] || result.detectedBroker || 'DETECTED';
+      brokerBadge.textContent = label;
+      brokerBadge.className = result.confidence > 0.5 ? 'rubber-stamp stamp-clean' : 'rubber-stamp stamp-neutral';
+    }
+
+    // 2. Counts
+    if (fillsCountEl) fillsCountEl.textContent = result.fills ? result.fills.length : 0;
+    if (tradesCountEl) tradesCountEl.textContent = result.trades ? result.trades.length : 0;
+
+    // 3. Warnings
+    if (warningBox) {
+      if (result.warnings && result.warnings.length > 0) {
+        warningBox.style.display = 'block';
+        warningBox.innerHTML = `<strong>Notice:</strong><ul style="margin: 0.25rem 0 0 1.25rem; padding: 0;">${result.warnings.map(w => `<li>${w}</li>`).join('')}</ul>`;
+      } else {
+        warningBox.style.display = 'none';
+        warningBox.innerHTML = '';
+      }
+    }
+
+    // 4. Draft Trades Preview Table
+    if (result.trades && result.trades.length > 0) {
+      if (draftsCard) draftsCard.style.display = 'block';
+      if (approveAllBtn) {
+        approveAllBtn.disabled = false;
+        approveAllBtn.textContent = `✓ Approve & Log to Journal (${result.trades.length})`;
+      }
+
+      let rows = '';
+      result.trades.forEach((t, idx) => {
+        const netPnL = Number(t.netPnL || 0);
+        const pnlColor = netPnL > 0 ? 'var(--ledger-profit)' : (netPnL < 0 ? 'var(--ledger-loss)' : 'var(--ink-muted)');
+        const sess = classifySessionBlock(t);
+        const sideClass = (t.direction || 'LONG').toLowerCase();
+
+        rows += `
+          <tr data-draft-idx="${idx}">
+            <td><strong>${t.symbol}</strong></td>
+            <td><span class="badge-source-${sideClass}">${t.direction}</span></td>
+            <td style="font-family: var(--font-mono);">${t.quantity || 1}</td>
+            <td style="font-size: 0.8rem; font-family: var(--font-mono); color: var(--ink-secondary);">${t.entryDate ? t.entryDate.slice(11, 16) : '--'}</td>
+            <td><span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">${sess.icon} ${sess.shortLabel}</span></td>
+            <td style="font-family: var(--font-mono);">${Number(t.entryPrice || 0).toFixed(2)} → ${Number(t.exitPrice || 0).toFixed(2)}</td>
+            <td style="font-family: var(--font-mono); color: var(--ink-muted);">$${Number(t.commissions || 0).toFixed(2)}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: ${pnlColor};">${netPnL >= 0 ? '+' : ''}$${netPnL.toFixed(2)}</td>
+            <td style="font-family: var(--font-mono);">${Number(t.rMultiple || 0) >= 0 ? '+' : ''}${Number(t.rMultiple || 0).toFixed(2)}R</td>
+            <td style="white-space: nowrap;">
+              <button class="btn btn-primary btn-sm btn-quick-ingest-single" data-draft-idx="${idx}" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">✓ Journal</button>
+              <button class="btn btn-secondary btn-sm btn-quick-ingest-fullform" data-draft-idx="${idx}" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">📝 Full Form</button>
+            </td>
+          </tr>
+        `;
+      });
+
+      if (draftsTbody) {
+        draftsTbody.innerHTML = rows;
+
+        // Bind single trade approval
+        draftsTbody.querySelectorAll('.btn-quick-ingest-single').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const idx = parseInt(btn.getAttribute('data-draft-idx'), 10);
+            const draft = result.trades[idx];
+            if (!draft) return;
+            await saveAndCommitTrades([draft]);
+            result.trades.splice(idx, 1);
+            if (result.trades.length === 0) {
+              resetParsedView();
+            } else {
+              renderParsedPreview(result);
+            }
+          });
+        });
+
+        // Bind open in full form
+        draftsTbody.querySelectorAll('.btn-quick-ingest-fullform').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const idx = parseInt(btn.getAttribute('data-draft-idx'), 10);
+            const draft = result.trades[idx];
+            if (!draft) return;
+            openInFullEntryForm(draft);
+            closeModal();
+          });
+        });
+      }
+    } else {
+      if (draftsCard) draftsCard.style.display = 'none';
+      if (draftsTbody) draftsTbody.innerHTML = '';
+      if (approveAllBtn) {
+        approveAllBtn.disabled = true;
+        approveAllBtn.textContent = '✓ Approve & Log to Journal';
+      }
+    }
+  };
+
+  // Helper to persist approved trades
+  const saveAndCommitTrades = async (incomingTrades) => {
+    if (!incomingTrades || incomingTrades.length === 0) return;
+
+    try {
+      const res = await fetch('/api/trades/quick-ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trades: incomingTrades })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.trades && data.trades.length > 0) {
+          trades.unshift(...data.trades);
+        } else {
+          trades.unshift(...incomingTrades);
+        }
+      } else {
+        // Fallback local persistence
+        trades.unshift(...incomingTrades);
+      }
+    } catch (err) {
+      console.warn('Quick Ingest API post failed, persisting in local state:', err);
+      trades.unshift(...incomingTrades);
+    }
+
+    trades = tagLegacySampleTrades(trades, sampleTrades);
+    persistLocalBackup();
+    refreshAllViews();
+    renderGallery();
+    if (document.getElementById('calendar-view')?.classList.contains('active')) {
+      renderCalendarView();
+    }
+  };
+
+  // Approve all button
+  if (approveAllBtn) {
+    approveAllBtn.addEventListener('click', async () => {
+      if (!currentParsedResult || !currentParsedResult.trades || currentParsedResult.trades.length === 0) return;
+      approveAllBtn.disabled = true;
+      approveAllBtn.textContent = 'Saving...';
+
+      const tradeCount = currentParsedResult.trades.length;
+      await saveAndCommitTrades(currentParsedResult.trades);
+
+      textarea.value = '';
+      resetParsedView();
+      closeModal();
+      alert(`✓ Successfully logged ${tradeCount} verified trade(s) to journal!`);
+    });
+  }
+
+  // Open in Full Form
+  const openInFullEntryForm = (draft) => {
+    const tradeModal = document.getElementById('trade-modal');
+    if (!tradeModal) return;
+
+    const formSource = document.getElementById('form-trade-source');
+    const formSymbol = document.getElementById('form-symbol');
+    const formAssetClass = document.getElementById('form-asset-class');
+    const formDirection = document.getElementById('form-direction');
+    const formEntryPrice = document.getElementById('form-entry-price');
+    const formExitPrice = document.getElementById('form-exit-price');
+    const formStopLoss = document.getElementById('form-stop-loss');
+    const formTakeProfit = document.getElementById('form-take-profit');
+    const formNotes = document.getElementById('form-notes');
+
+    if (formSource) formSource.value = 'PERSONAL';
+    if (formSymbol) formSymbol.value = draft.symbol || '';
+    if (formAssetClass) formAssetClass.value = draft.assetClass || inferAssetClassFromSymbol(draft.symbol || '');
+    if (formDirection) formDirection.value = draft.direction || 'LONG';
+    if (formEntryPrice) formEntryPrice.value = draft.entryPrice || '';
+    if (formExitPrice) formExitPrice.value = draft.exitPrice || '';
+    if (formStopLoss) formStopLoss.value = draft.stopLoss || '';
+    if (formTakeProfit) formTakeProfit.value = draft.takeProfit || '';
+    if (formNotes) {
+      formNotes.value = `Broker Import (${draft.broker || 'Direct'}) | Qty: ${draft.quantity || 1} | Commissions: $${Number(draft.commissions || 0).toFixed(2)}`;
+    }
+
+    // Trigger input events to update risk calculations and preview
+    formSymbol?.dispatchEvent(new Event('input'));
+    formEntryPrice?.dispatchEvent(new Event('input'));
+    formStopLoss?.dispatchEvent(new Event('input'));
+
+    tradeModal.classList.add('open');
+  };
+}
+
+
 

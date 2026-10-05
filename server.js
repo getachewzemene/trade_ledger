@@ -63,6 +63,21 @@ import {
   compareVisualAccountabilityCohorts,
   generateVisualJournalObservations
 } from './src/engine/visual-journal.js';
+import {
+  SESSION_BLOCKS,
+  SESSION_ORDER,
+  DAYS_OF_WEEK,
+  classifySessionBlock,
+  formatDateKey,
+  buildMonthlyCalendar,
+  buildWeeklyMatrix,
+  generateSessionHeatmap,
+  buildDayAudit
+} from './src/engine/calendar-heatmap.js';
+import {
+  parseBrokerOrderText,
+  SUPPORTED_BROKERS
+} from './src/engine/broker-parser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -618,6 +633,97 @@ const server = http.createServer((req, res) => {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ metrics, cohorts, observations, screenshots: screenshotsMetadata }));
+    return;
+  }
+
+  // GET /api/calendar/month
+  if (pathname === '/api/calendar/month' && req.method === 'GET') {
+    const year = Number(parsedUrl.searchParams.get('year')) || new Date().getUTCFullYear();
+    const month = parsedUrl.searchParams.has('month') ? Number(parsedUrl.searchParams.get('month')) : new Date().getUTCMonth();
+    const excludeSample = parsedUrl.searchParams.get('includeSample') !== 'true';
+
+    const calData = buildMonthlyCalendar(year, month, activeTrades, preEntryPlans, missedSetups, { excludeSample });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(calData));
+    return;
+  }
+
+  // GET /api/calendar/heatmap
+  if (pathname === '/api/calendar/heatmap' && req.method === 'GET') {
+    const excludeSample = parsedUrl.searchParams.get('includeSample') !== 'true';
+    const heatmap = generateSessionHeatmap(activeTrades, { excludeSample });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(heatmap));
+    return;
+  }
+
+  // GET /api/calendar/day
+  if (pathname === '/api/calendar/day' && req.method === 'GET') {
+    const date = parsedUrl.searchParams.get('date') || new Date().toISOString().slice(0, 10);
+    const excludeSample = parsedUrl.searchParams.get('includeSample') !== 'true';
+    const audit = buildDayAudit(date, activeTrades, preEntryPlans, missedSetups, { excludeSample });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(audit));
+    return;
+  }
+
+  // POST /api/trades/parse-order-text
+  if (pathname === '/api/trades/parse-order-text' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const parsed = parseBrokerOrderText(payload.rawText || '');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(parsed));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/trades/quick-ingest
+  if (pathname === '/api/trades/quick-ingest' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const rawTrades = Array.isArray(payload.trades) ? payload.trades : (payload.rawText ? parseBrokerOrderText(payload.rawText).trades : []);
+        if (rawTrades.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No valid trades found to ingest.' }));
+          return;
+        }
+
+        const saved = [];
+        const errors = [];
+        for (const raw of rawTrades) {
+          const { valid, errors: errs, trade } = validateTradePayload(raw);
+          if (valid) {
+            trade.source = TRADE_SOURCES.BROKER_IMPORT;
+            trade.id = trade.id || `TR-INGEST-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+            activeTrades.unshift(trade);
+            saved.push(trade);
+          } else {
+            errors.push({ trade: raw, errors: errs });
+          }
+        }
+
+        if (saved.length > 0) {
+          persistTrades();
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: saved.length > 0, savedCount: saved.length, savedTrades: saved, errors }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
     return;
   }
 
