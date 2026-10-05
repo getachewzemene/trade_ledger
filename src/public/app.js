@@ -12,6 +12,17 @@ import { calculatePerformanceMetrics, groupTradesBy } from '../engine/metrics.js
 import { calculatePositionSize, calculateInstrumentAwarePositionSize, evaluateInstrumentRiskGuardrails, getInstrumentSpec } from '../engine/sizing.js';
 import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome, EXECUTION_DISCLAIMER } from '../engine/execution-quality.js';
 import { generateTraderHistoryObservations, REVIEW_DISCLAIMER } from '../engine/trader-review.js';
+import {
+  createPreEntryPlan,
+  linkPlanToExecutedTrade,
+  createMissedSetup,
+  analyzeMissedSetups,
+  documentRuleViolationRecord,
+  evaluateSessionLimitsAndPause,
+  STAND_DOWN_STATUSES,
+  MISSED_SETUP_REASONS,
+  DELIBERATE_PAUSE_PRINCIPLES
+} from '../engine/deliberate-pause.js';
 import { analyzeTradeViolations, calculateLeakDiagnostics, LEAK_DEFINITIONS } from '../engine/leak-detector.js';
 import { buildTradeSummaryReport } from '../engine/reporting.js';
 import { importTradesFromCSV } from '../engine/csv-parser.js';
@@ -73,6 +84,9 @@ let activeLessonId = 'lesson-1';
 let curriculumData = [];
 let tradingContract = { ...DEFAULT_TRADING_CONTRACT };
 let preSessionLogs = [];
+let preEntryPlans = [];
+let missedSetups = [];
+let activePreEntryPlanId = null;
 let annotatingTrade = null;
 let currentTool = 'line';
 let isDrawing = false;
@@ -422,12 +436,14 @@ async function initApp() {
 
   // Load Initial Data from REST API
   try {
-    const [tradesRes, currRes, contractRes, preRes, samplesRes] = await Promise.all([
+    const [tradesRes, currRes, contractRes, preRes, samplesRes, plansRes, missedRes] = await Promise.all([
       fetch('/api/trades'),
       fetch('/api/curriculum'),
       fetch('/api/contract'),
       fetch('/api/presession'),
-      fetch('/api/sample-trades')
+      fetch('/api/sample-trades'),
+      fetch('/api/plans/pre-entry'),
+      fetch('/api/missed-setups')
     ]);
     trades = await tradesRes.json();
     curriculumData = await currRes.json();
@@ -435,6 +451,15 @@ async function initApp() {
     preSessionLogs = await preRes.json();
     sampleTrades = await samplesRes.json();
     trades = tagLegacySampleTrades(trades, sampleTrades);
+
+    if (plansRes && plansRes.ok) {
+      const pData = await plansRes.json();
+      preEntryPlans = pData.plans || [];
+    }
+    if (missedRes && missedRes.ok) {
+      const mData = await missedRes.json();
+      missedSetups = mData.records || [];
+    }
 
     if (trades.length === 0 && localBackup) {
       trades = localBackup.trades || [];
@@ -454,6 +479,8 @@ async function initApp() {
   updateSessionUI();
 
   renderTradingPlan(true);
+  setupPreEntryCommitment();
+  setupMissedSetups();
   refreshAllViews();
   renderCurriculum();
   renderPreSession();
@@ -482,6 +509,9 @@ function refreshAllViews() {
   updateGatekeeperBadge();
   renderPropFirmGuardian();
   renderPlaybookView();
+  renderSessionStandDownBanner();
+  renderPendingPreEntryPlans();
+  renderMissedSetupsSummary();
 }
 
 /**
@@ -2105,6 +2135,7 @@ function setupModal() {
         disciplineScore: debriefGrade.score,
         preSessionCompleted: isPreSessionDone,
         notes,
+        planId: activePreEntryPlanId || undefined,
         source: (document.getElementById('form-trade-source')?.value === 'SIMULATED' || Boolean(demoPracticeSetupId)) ? TRADE_SOURCES.DEMO_PRACTICE : TRADE_SOURCES.MANUAL,
         executionMode: (document.getElementById('form-trade-source')?.value === 'SIMULATED' || Boolean(demoPracticeSetupId)) ? 'DEMO' : 'JOURNAL'
       };
@@ -2121,6 +2152,7 @@ function setupModal() {
 
       trades.push(newTrade);
       demoPracticeSetupId = null;
+      activePreEntryPlanId = null;
       saveCurrentUserProfile();
       persistLocalBackup();
       refreshAllViews();
@@ -2255,6 +2287,373 @@ function setupExport() {
       console.warn('Report fetch failed', err);
     }
   });
+}
+
+/**
+ * 22. Deliberate Review-and-Pause & Session Stand-Down Controller
+ */
+function renderSessionStandDownBanner() {
+  const performanceTrades = getPerformanceTrades();
+  const pauseStatus = evaluateSessionLimitsAndPause({
+    trades: performanceTrades,
+    tradingPlan,
+    contract: tradingContract,
+    preSessionLogs
+  });
+
+  const headerBadge = document.getElementById('header-pause-badge');
+  if (headerBadge) {
+    if (pauseStatus.standDownStatus === STAND_DOWN_STATUSES.LIMIT_REACHED_STAND_DOWN || pauseStatus.standDownStatus === STAND_DOWN_STATUSES.CIRCUIT_BREAKER_LOCKED) {
+      headerBadge.className = 'rubber-stamp stamp-danger';
+      headerBadge.textContent = 'LIMITS: REACHED 🛑';
+    } else if (pauseStatus.standDownStatus === STAND_DOWN_STATUSES.COOLDOWN_ACTIVE || pauseStatus.standDownStatus === STAND_DOWN_STATUSES.PACING_PAUSE) {
+      headerBadge.className = 'rubber-stamp stamp-warning';
+      headerBadge.textContent = 'PAUSE: ACTIVE ⏸️';
+    } else {
+      headerBadge.className = 'rubber-stamp stamp-clean';
+      headerBadge.textContent = 'LIMITS: NORMAL ✓';
+    }
+  }
+
+  const banner = document.getElementById('session-standdown-banner');
+  const openModalBtn = document.getElementById('btn-open-modal');
+
+  if (!banner) return;
+
+  if (pauseStatus.isDeliberatePauseActive) {
+    banner.style.display = 'block';
+    if (pauseStatus.bannerClass === 'stand-down-critical') {
+      banner.style.borderColor = 'var(--ledger-loss)';
+      banner.style.background = '#FAECEB';
+    } else {
+      banner.style.borderColor = 'var(--accent-brass)';
+      banner.style.background = '#FFF9F2';
+    }
+
+    const stampEl = document.getElementById('standdown-stamp');
+    if (stampEl) {
+      stampEl.className = pauseStatus.bannerClass === 'stand-down-critical' ? 'rubber-stamp stamp-danger' : 'rubber-stamp stamp-warning';
+      stampEl.textContent = pauseStatus.standDownStatus === STAND_DOWN_STATUSES.LIMIT_REACHED_STAND_DOWN ? 'SESSION COMPLETE' : 'DELIBERATE PAUSE';
+    }
+
+    const headlineEl = document.getElementById('standdown-headline');
+    if (headlineEl) headlineEl.textContent = pauseStatus.headline;
+
+    const messageEl = document.getElementById('standdown-message');
+    if (messageEl) messageEl.textContent = pauseStatus.message;
+
+    const timerPill = document.getElementById('standdown-timer-pill');
+    if (timerPill) {
+      if (pauseStatus.remainingCooldownSeconds > 0) {
+        timerPill.textContent = `COOLDOWN: ${Math.ceil(pauseStatus.remainingCooldownSeconds / 60)}M REMAINING`;
+      } else if (pauseStatus.pacingMinutesRemaining > 0) {
+        timerPill.textContent = `PACING: ${pauseStatus.pacingMinutesRemaining}M PAUSE`;
+      } else {
+        timerPill.textContent = 'SESSION STAND-DOWN';
+      }
+    }
+
+    const actionsEl = document.getElementById('standdown-actions');
+    if (actionsEl) {
+      actionsEl.innerHTML = `
+        <div style="font-weight: bold; margin-bottom: 0.35rem; color: var(--ink-primary);">Stand-Down Restraint Protocol:</div>
+        <ul style="margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.25rem;">
+          ${pauseStatus.standDownActionSteps.map(a => `<li>${a}</li>`).join('')}
+        </ul>
+        <div style="margin-top: 0.5rem; font-style: italic; font-size: 0.76rem; color: var(--ink-muted);">
+          ${pauseStatus.antiPressurePhilosophy}
+        </div>
+      `;
+    }
+
+    if (openModalBtn && !pauseStatus.isTradingAllowed) {
+      openModalBtn.title = 'Session limits reached. Deliberate pause active.';
+    }
+  } else {
+    banner.style.display = 'none';
+    if (openModalBtn) openModalBtn.title = '+ Log Trade';
+  }
+}
+
+/**
+ * 23. Pre-Entry Plan Commitment Controller
+ */
+function setupPreEntryCommitment() {
+  const modal = document.getElementById('preentry-modal');
+  const openBtn = document.getElementById('btn-open-preentry-modal');
+  const closeBtn = document.getElementById('btn-close-preentry-modal');
+  const cancelBtn = document.getElementById('btn-cancel-preentry');
+  const form = document.getElementById('form-preentry');
+
+  if (openBtn) {
+    openBtn.addEventListener('click', () => {
+      modal?.classList.add('open');
+    });
+  }
+
+  const closeModal = () => modal?.classList.remove('open');
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  // Live R:R preview
+  const updateRRPreview = () => {
+    const entry = parseFloat(document.getElementById('form-plan-entry')?.value) || 0;
+    const stop = parseFloat(document.getElementById('form-plan-stop')?.value) || 0;
+    const target = parseFloat(document.getElementById('form-plan-target')?.value) || 0;
+    const dir = document.getElementById('form-plan-direction')?.value || 'LONG';
+
+    const rrEl = document.getElementById('plan-preview-rr');
+    const distEl = document.getElementById('plan-preview-dist');
+
+    if (entry > 0 && stop > 0 && target > 0) {
+      const stopDist = Math.abs(entry - stop);
+      const targetDist = dir === 'LONG' ? target - entry : entry - target;
+      if (stopDist > 0 && targetDist > 0) {
+        const rr = (targetDist / stopDist).toFixed(2);
+        if (rrEl) {
+          rrEl.textContent = `${rr} : 1`;
+          rrEl.style.color = rr >= 2.0 ? 'var(--ledger-profit)' : 'var(--accent-brass)';
+        }
+        if (distEl) distEl.textContent = `${stopDist.toFixed(2)} pts stop / ${targetDist.toFixed(2)} pts target`;
+        return;
+      }
+    }
+    if (rrEl) rrEl.textContent = '-- : 1';
+    if (distEl) distEl.textContent = '--';
+  };
+
+  ['form-plan-entry', 'form-plan-stop', 'form-plan-target', 'form-plan-direction'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', updateRRPreview);
+  });
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const planPayload = {
+        symbol: document.getElementById('form-plan-symbol').value,
+        direction: document.getElementById('form-plan-direction').value,
+        setupId: document.getElementById('form-plan-setup').value,
+        plannedRiskDollars: parseFloat(document.getElementById('form-plan-risk').value) || 100,
+        plannedEntryPrice: parseFloat(document.getElementById('form-plan-entry').value),
+        plannedStopLoss: parseFloat(document.getElementById('form-plan-stop').value),
+        plannedTakeProfit: parseFloat(document.getElementById('form-plan-target').value),
+        thesis: document.getElementById('form-plan-thesis').value,
+        mentalCheck: {
+          isCalm: document.getElementById('plan-check-calm')?.checked ?? true,
+          waitedForSetup: document.getElementById('plan-check-trigger')?.checked ?? true,
+          acceptsRisk: document.getElementById('plan-check-accept')?.checked ?? true
+        }
+      };
+
+      try {
+        const res = await fetch('/api/plans/pre-entry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(planPayload)
+        });
+        const data = await res.json();
+        if (data.plan) {
+          preEntryPlans.unshift(data.plan);
+        }
+      } catch (err) {
+        console.warn('Pre-entry plan save fallback to local', err);
+        const { plan } = createPreEntryPlan(planPayload);
+        if (plan) preEntryPlans.unshift(plan);
+      }
+
+      closeModal();
+      form.reset();
+      renderPendingPreEntryPlans();
+    });
+  }
+}
+
+/**
+ * Render Pending Pre-Entry Commitment Plans in View 1
+ */
+function renderPendingPreEntryPlans() {
+  const container = document.getElementById('preentry-plans-container');
+  if (!container) return;
+
+  const pending = preEntryPlans.filter(p => p.status === 'PENDING');
+  if (pending.length === 0) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div class="card" style="border: 1.5px solid var(--accent-brass); background: #FFFBF5; padding: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">PRE-ENTRY COMMITMENTS</span>
+          <h4 style="font-family: var(--font-serif); font-size: 1.1rem; margin: 0; color: var(--ink-primary);">Planned Setups Awaiting Execution Trigger</h4>
+        </div>
+        <span class="badge-source-personal" style="font-size: 0.75rem;">${pending.length} PLAN(S) COMMITTED</span>
+      </div>
+      <div style="display: grid; gap: 0.75rem;">
+        ${pending.map(plan => `
+          <div class="card" style="background: #FFF; border: 1px solid var(--ledger-paper-border); padding: 0.85rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                <strong style="font-family: var(--font-mono); font-size: 1.05rem;">${plan.symbol}</strong>
+                <span class="rubber-stamp ${plan.direction === 'LONG' ? 'stamp-clean' : 'stamp-danger'}" style="font-size: 0.65rem;">${plan.direction}</span>
+                <span style="font-size: 0.8rem; color: var(--ink-muted);">${plan.setupId}</span>
+                <span class="rubber-stamp stamp-neutral" style="font-size: 0.65rem;">PLANNED R:R ${plan.plannedRR || '--'}:1</span>
+              </div>
+              <div style="font-family: var(--font-mono); font-size: 0.82rem; color: var(--ink-secondary);">
+                Entry: <strong>${plan.plannedEntryPrice}</strong> | Invalidation Stop: <strong style="color: var(--ledger-loss);">${plan.plannedStopLoss}</strong> | Target: <strong style="color: var(--ledger-profit);">${plan.plannedTakeProfit}</strong> | Risk: <strong>$${plan.plannedRiskDollars}</strong>
+              </div>
+              ${plan.thesis ? `<div style="font-size: 0.76rem; color: var(--ink-muted); margin-top: 0.25rem;"><em>Thesis: ${plan.thesis}</em></div>` : ''}
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn btn-primary btn-sm btn-execute-plan" data-plan-id="${plan.id}" title="Convert pre-planned intent to active execution">🚀 Confirm Trigger &amp; Log</button>
+              <button class="btn btn-secondary btn-sm btn-cancel-plan" data-plan-id="${plan.id}" title="Cancel plan if trigger never occurred">Cancel Plan</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  // Attach button listeners
+  container.querySelectorAll('.btn-execute-plan').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const planId = btn.getAttribute('data-plan-id');
+      const plan = preEntryPlans.find(p => p.id === planId);
+      if (!plan) return;
+
+      activePreEntryPlanId = plan.id;
+      const tradeModal = document.getElementById('trade-modal');
+      if (tradeModal) {
+        document.getElementById('form-symbol').value = plan.symbol;
+        document.getElementById('form-direction').value = plan.direction;
+        document.getElementById('form-setup').value = plan.setupId;
+        document.getElementById('form-entry-price').value = plan.plannedEntryPrice;
+        document.getElementById('form-stop-loss').value = plan.plannedStopLoss;
+        document.getElementById('form-take-profit').value = plan.plannedTakeProfit;
+        document.getElementById('form-planned-risk').value = plan.plannedRiskDollars;
+        if (plan.thesis) document.getElementById('form-notes').value = `[Pre-Planned Setup]: ${plan.thesis}`;
+
+        tradeModal.classList.add('open');
+      }
+    });
+  });
+
+  container.querySelectorAll('.btn-cancel-plan').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const planId = btn.getAttribute('data-plan-id');
+      const plan = preEntryPlans.find(p => p.id === planId);
+      if (plan) plan.status = 'CANCELLED';
+      try {
+        await fetch('/api/plans/pre-entry/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: planId })
+        });
+      } catch (err) {
+        console.warn('Plan cancel err', err);
+      }
+      renderPendingPreEntryPlans();
+    });
+  });
+}
+
+/**
+ * 24. Missed Setup & Passed Opportunity Controller
+ */
+function setupMissedSetups() {
+  const modal = document.getElementById('missed-setup-modal');
+  const openBtn = document.getElementById('btn-open-missed-modal');
+  const closeBtn = document.getElementById('btn-close-missed-modal');
+  const cancelBtn = document.getElementById('btn-cancel-missed');
+  const form = document.getElementById('form-missed-setup');
+
+  if (openBtn) {
+    openBtn.addEventListener('click', () => {
+      modal?.classList.add('open');
+    });
+  }
+
+  const closeModal = () => modal?.classList.remove('open');
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const missedPayload = {
+        symbol: document.getElementById('form-missed-symbol').value,
+        direction: document.getElementById('form-missed-direction').value,
+        setupId: document.getElementById('form-missed-setup-id').value,
+        reasonCode: document.getElementById('form-missed-reason').value,
+        hypotheticalR: parseFloat(document.getElementById('form-missed-hypo-r').value) || 0,
+        reflection: document.getElementById('form-missed-reflection').value,
+        date: document.getElementById('form-missed-date').value || new Date().toISOString()
+      };
+
+      try {
+        const res = await fetch('/api/missed-setups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(missedPayload)
+        });
+        const data = await res.json();
+        if (data.record) {
+          missedSetups.unshift(data.record);
+        }
+      } catch (err) {
+        console.warn('Missed setup save err', err);
+        const record = createMissedSetup(missedPayload);
+        missedSetups.unshift(record);
+      }
+
+      closeModal();
+      form.reset();
+      renderMissedSetupsSummary();
+    });
+  }
+}
+
+/**
+ * Render Missed Setups Summary Shelf in View 1
+ */
+function renderMissedSetupsSummary() {
+  const container = document.getElementById('missed-setups-container');
+  if (!container) return;
+
+  const analysis = analyzeMissedSetups(missedSetups);
+  if (analysis.totalMissedCount === 0) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div class="card" style="border: 1.5px solid var(--ledger-paper-border); background: var(--ledger-paper-subtle); padding: 0.85rem 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span class="rubber-stamp stamp-clean" style="font-size: 0.65rem;">RESTRAINT LOG</span>
+          <h4 style="font-family: var(--font-serif); font-size: 1.05rem; margin: 0; color: var(--ink-primary);">Documented Missed Setups &amp; Passed Moves</h4>
+        </div>
+        <span class="badge-source-verified" style="font-size: 0.72rem; font-family: var(--font-mono);">
+          DISCIPLINE WINS: ${analysis.disciplineWinsCount} / ${analysis.totalMissedCount} (${analysis.disciplineWinPercent}%)
+        </span>
+      </div>
+      <p style="font-size: 0.82rem; line-height: 1.5; color: var(--ink-secondary); margin: 0.35rem 0;">
+        ${analysis.summaryObservation}
+      </p>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+        ${analysis.records.slice(0, 4).map(m => `
+          <div style="background: #FFF; border: 1px solid var(--ledger-paper-border); border-radius: var(--radius-sm); padding: 0.35rem 0.6rem; font-size: 0.75rem; font-family: var(--font-mono);">
+            <strong>${m.symbol} ${m.direction}</strong>: <span style="color: ${m.isDisciplineWin ? 'var(--ledger-profit)' : 'var(--ink-secondary)'};">${m.reasonLabel}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
 }
 
 // Start application

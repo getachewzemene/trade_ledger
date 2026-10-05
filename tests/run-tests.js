@@ -69,6 +69,19 @@ import {
   getSampleSizeCaveat,
   REVIEW_DISCLAIMER
 } from '../src/engine/trader-review.js';
+import {
+  DELIBERATE_PAUSE_PRINCIPLES,
+  STAND_DOWN_STATUSES,
+  MISSED_SETUP_REASONS,
+  VIOLATION_ROOT_CAUSES,
+  validatePreEntryPlan,
+  createPreEntryPlan,
+  linkPlanToExecutedTrade,
+  createMissedSetup,
+  analyzeMissedSetups,
+  documentRuleViolationRecord,
+  evaluateSessionLimitsAndPause
+} from '../src/engine/deliberate-pause.js';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -1294,6 +1307,235 @@ console.log('\n--- Suite 20: Trader History Review & Empirical Observations with
   assert(REVIEW_DISCLAIMER.text.includes('All review statements are strictly descriptive observations'), 'Disclaimer states observations are descriptive');
   assert(REVIEW_DISCLAIMER.text.includes('not constitute forward predictions'), 'Disclaimer confirms no forward predictions');
   assertEquals(REVIEW_DISCLAIMER.isPrediction, false, 'Disclaimer declares isPrediction: false');
+}
+
+console.log('\n--- Suite 21: Deliberate Review-and-Pause & Pre-Entry Commitment Engine ---');
+{
+  // 1. Philosophy & Anti-Pressure Principles
+  assert(DELIBERATE_PAUSE_PRINCIPLES.aim.includes('Reduce impulsive decisions'), 'Deliberate pause aims to reduce impulsive decisions');
+  assert(DELIBERATE_PAUSE_PRINCIPLES.aim.includes('zero gamification or pressure to trade more'), 'Deliberate pause rejects gamification and pressure to trade');
+  assert(DELIBERATE_PAUSE_PRINCIPLES.goldenRules.length >= 4, 'Includes core golden rules of restraint');
+
+  // 2. Pre-Entry Plan Validation
+  const emptyValidation = validatePreEntryPlan({});
+  assertEquals(emptyValidation.valid, false, 'Empty plan fails validation');
+  assert(emptyValidation.errors.length >= 3, 'Reports missing symbol, entry price, and stop loss');
+
+  // Long stop loss must be BELOW entry
+  const invalidLongPlan = validatePreEntryPlan({
+    symbol: 'ES',
+    direction: 'LONG',
+    plannedEntryPrice: 5000,
+    plannedStopLoss: 5010
+  });
+  assertEquals(invalidLongPlan.valid, false, 'Long stop loss above entry price fails validation');
+  assert(invalidLongPlan.errors[0].includes('Long stop loss must be placed BELOW'), 'Explains long stop loss geometry');
+
+  // Short stop loss must be ABOVE entry
+  const invalidShortPlan = validatePreEntryPlan({
+    symbol: 'NQ',
+    direction: 'SHORT',
+    plannedEntryPrice: 18000,
+    plannedStopLoss: 17900
+  });
+  assertEquals(invalidShortPlan.valid, false, 'Short stop loss below entry price fails validation');
+  assert(invalidShortPlan.errors[0].includes('Short stop loss must be placed ABOVE'), 'Explains short stop loss geometry');
+
+  // Valid long plan
+  const validLongPlan = createPreEntryPlan({
+    symbol: 'ES',
+    direction: 'LONG',
+    setupId: 'BREAK_AND_RETEST',
+    plannedEntryPrice: 5000,
+    plannedStopLoss: 4980,
+    plannedTakeProfit: 5060,
+    plannedRiskDollars: 250,
+    thesis: 'Retest of previous session high with volume support',
+    confluenceFactors: ['HTF_LEVEL', 'SESSION_VWAP'],
+    mentalCheck: { isCalm: true, waitedForSetup: true, acceptsRisk: true }
+  });
+  assertEquals(validLongPlan.valid, true, 'Valid long plan passes creation');
+  assert(validLongPlan.plan.id.startsWith('PLAN-'), 'Plan receives unique PLAN- ID');
+  assertEquals(validLongPlan.plan.stopDistance, 20, 'Stop distance is 20 points');
+  assertEquals(validLongPlan.plan.plannedRR, 3.0, 'Planned R:R is 3.00 (60/20)');
+  assertEquals(validLongPlan.plan.status, 'PENDING', 'Initial plan status is PENDING');
+  assertEquals(validLongPlan.plan.mentalCheck.isCalm, true, 'Pre-entry mental check recorded');
+
+  // 3. Linking Plan to Executed Trade with Slippage
+  const rawExecutedTrade = {
+    id: 'TRADE-101',
+    symbol: 'ES',
+    direction: 'LONG',
+    entryPrice: 5001.50,
+    exitPrice: 5060.00,
+    netPnL: 585,
+    rMultiple: 2.92
+  };
+  const linkedTrade = linkPlanToExecutedTrade(validLongPlan.plan, rawExecutedTrade);
+  assertEquals(linkedTrade.planId, validLongPlan.plan.id, 'Executed trade linked to plan ID');
+  assertEquals(linkedTrade.wasPrePlanned, true, 'Trade tagged as wasPrePlanned');
+  assertEquals(linkedTrade.entrySlippage, 1.5, 'Tracks execution slippage between actual and planned entry (5001.5 - 5000)');
+  assertEquals(linkedTrade.plannedRR, 3.0, 'Preserves planned R:R in trade record');
+
+  // 4. Missed Setups & Discipline Wins Analysis
+  const intentionalPass = createMissedSetup({
+    symbol: 'NQ',
+    setupId: 'ORB',
+    direction: 'LONG',
+    reasonCode: 'INTENTIONAL_LIMIT_STAND_DOWN',
+    reflection: 'Daily trade limit reached. Respected stand-down rule.'
+  });
+  assertEquals(intentionalPass.isDisciplineWin, true, 'Intentional stand-down is classified as a Discipline Win');
+  assert(intentionalPass.id.startsWith('MISSED-'), 'Missed setup receives MISSED- ID');
+
+  const runawayPass = createMissedSetup({
+    symbol: 'CL',
+    setupId: 'BREAKOUT',
+    direction: 'LONG',
+    reasonCode: 'CHASED_RUNAWAY_DID_NOT_CHASE',
+    reflection: 'Price gapped up before trigger. Did not chase.'
+  });
+  assertEquals(runawayPass.isDisciplineWin, true, 'Resisting chasing runaway price is classified as a Discipline Win');
+
+  const fearHesitation = createMissedSetup({
+    symbol: 'GC',
+    setupId: 'PULLBACK',
+    direction: 'SHORT',
+    reasonCode: 'HESITATED_FEAR',
+    reflection: 'Valid signal but hesitated due to recent loss anxiety.'
+  });
+  assertEquals(fearHesitation.isDisciplineWin, false, 'Fear hesitation is not a discipline win');
+
+  const missedAnalysis = analyzeMissedSetups([intentionalPass, runawayPass, fearHesitation]);
+  assertEquals(missedAnalysis.totalMissedCount, 3, 'Total missed setups logged = 3');
+  assertEquals(missedAnalysis.disciplineWinsCount, 2, 'Discipline wins = 2');
+  assertEquals(missedAnalysis.hesitationsCount, 1, 'Hesitations count = 1');
+  assertEquals(missedAnalysis.disciplineWinPercent, 66.7, 'Discipline win rate = 66.7% (2/3)');
+  assert(missedAnalysis.uncertainty.formatted !== undefined, 'Wilson 95% CI computed for missed setup restraint rate');
+  assert(missedAnalysis.summaryObservation.includes('Passing a setup costs $0'), 'Observation emphasizes that passing costs $0 and preserves mental capital');
+
+  // 5. Post-Trade Violation Analysis & Pause Duration
+  const standardViolation = documentRuleViolationRecord(
+    { id: 'T-VIOL-1', symbol: 'ES' },
+    { breachedRule: 'LATE_ENTRY', rootCause: 'FOMO', notes: 'Jumped in after 3 green bars' }
+  );
+  assertEquals(standardViolation.rootCause, 'FOMO', 'Documents FOMO root cause');
+  assertEquals(standardViolation.recommendedPauseMinutes, 20, 'Standard violation recommends 20-minute pause');
+  assert(standardViolation.remediationAction.includes('20-minute deliberate pause'), 'Remediation mandates stepping away to break emotional loop');
+
+  const severeRevengeViolation = documentRuleViolationRecord(
+    { id: 'T-VIOL-2', symbol: 'NQ' },
+    { breachedRule: 'REVENGE', rootCause: 'REVENGE', notes: 'Re-entered immediately after stop out' }
+  );
+  assertEquals(severeRevengeViolation.recommendedPauseMinutes, 45, 'Revenge violation requires extended 45-minute deliberate pause');
+
+  // 6. Master Session Limits and Deliberate Pause Evaluation
+  const fixedNow = '2026-10-05T14:00:00.000Z';
+
+  // 6a. Clean Session (under limits)
+  const cleanEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'T1', entryDate: '2026-10-05T10:00:00.000Z', exitDate: '2026-10-05T10:30:00.000Z', netPnL: 150, rMultiple: 1.5, source: 'PERSONAL' }
+    ],
+    tradingPlan: { maxDailyTrades: 3, maxDailyLossR: 2.0 },
+    contract: { cooldownMinutes: 30 },
+    currentTime: fixedNow,
+    minPacingMinutes: 15
+  });
+  assertEquals(cleanEval.standDownStatus, STAND_DOWN_STATUSES.OPEN, 'Clean session status is OPEN');
+  assertEquals(cleanEval.isTradingAllowed, true, 'Trading is allowed when under limits');
+  assertEquals(cleanEval.isDeliberatePauseActive, false, 'No deliberate pause active during open session');
+  assertEquals(cleanEval.todayTradesCount, 1, 'Today trade count is 1');
+
+  // 6b. Daily Trade Limit Reached -> Stand-Down
+  const tradeCapEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'T1', entryDate: '2026-10-05T09:30:00.000Z', exitDate: '2026-10-05T10:00:00.000Z', netPnL: 100, rMultiple: 1.0, source: 'PERSONAL' },
+      { id: 'T2', entryDate: '2026-10-05T10:30:00.000Z', exitDate: '2026-10-05T11:00:00.000Z', netPnL: -100, rMultiple: -1.0, source: 'PERSONAL' },
+      { id: 'T3', entryDate: '2026-10-05T12:00:00.000Z', exitDate: '2026-10-05T12:30:00.000Z', netPnL: 50, rMultiple: 0.5, source: 'PERSONAL' }
+    ],
+    tradingPlan: { maxDailyTrades: 3, maxDailyLossR: 2.0 },
+    currentTime: fixedNow
+  });
+  assertEquals(tradeCapEval.standDownStatus, STAND_DOWN_STATUSES.LIMIT_REACHED_STAND_DOWN, 'Trade cap triggers LIMIT_REACHED_STAND_DOWN');
+  assertEquals(tradeCapEval.isTradingAllowed, false, 'Trading disabled when daily trade cap reached');
+  assertEquals(tradeCapEval.isDeliberatePauseActive, true, 'Stand-down pause is active');
+  assert(tradeCapEval.headline.includes('DAILY TRADE CAP REACHED'), 'Headline alerts daily trade cap reached');
+  assert(tradeCapEval.standDownActionSteps.length >= 2, 'Provides clear actionable stand-down steps');
+
+  // 6c. Daily Loss Ceiling Reached -> Stand-Down
+  const lossCapEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'TL1', entryDate: '2026-10-05T09:30:00.000Z', exitDate: '2026-10-05T10:00:00.000Z', netPnL: -100, rMultiple: -1.0, source: 'PERSONAL' },
+      { id: 'TL2', entryDate: '2026-10-05T11:00:00.000Z', exitDate: '2026-10-05T11:30:00.000Z', netPnL: -120, rMultiple: -1.2, source: 'PERSONAL' }
+    ],
+    tradingPlan: { maxDailyTrades: 5, maxDailyLossR: 2.0 },
+    currentTime: fixedNow
+  });
+  assertEquals(lossCapEval.standDownStatus, STAND_DOWN_STATUSES.LIMIT_REACHED_STAND_DOWN, 'Loss limit triggers LIMIT_REACHED_STAND_DOWN');
+  assertEquals(lossCapEval.isTradingAllowed, false, 'Trading disabled when daily loss limit hit');
+  assertEquals(lossCapEval.todayLossR, 2.2, 'Accumulated daily loss is 2.20R');
+  assert(lossCapEval.headline.includes('DAILY LOSS CEILING REACHED'), 'Headline alerts daily loss ceiling reached');
+
+  // 6d. Circuit Breaker on 3 Consecutive Losses
+  const circuitBreakerEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'TC1', entryDate: '2026-10-05T09:30:00.000Z', exitDate: '2026-10-05T10:00:00.000Z', netPnL: -50, rMultiple: -0.5, source: 'PERSONAL' },
+      { id: 'TC2', entryDate: '2026-10-05T10:30:00.000Z', exitDate: '2026-10-05T11:00:00.000Z', netPnL: -50, rMultiple: -0.5, source: 'PERSONAL' },
+      { id: 'TC3', entryDate: '2026-10-05T11:30:00.000Z', exitDate: '2026-10-05T12:00:00.000Z', netPnL: -50, rMultiple: -0.5, source: 'PERSONAL' }
+    ],
+    tradingPlan: { maxDailyTrades: 5, maxDailyLossR: 3.0 },
+    currentTime: fixedNow
+  });
+  assertEquals(circuitBreakerEval.standDownStatus, STAND_DOWN_STATUSES.CIRCUIT_BREAKER_LOCKED, '3 consecutive losses triggers CIRCUIT_BREAKER_LOCKED');
+  assertEquals(circuitBreakerEval.isTradingAllowed, false, 'Trading locked out by circuit breaker');
+  assert(circuitBreakerEval.headline.includes('CIRCUIT BREAKER LOCKOUT'), 'Circuit breaker lockout headline displayed');
+
+  // 6e. Mandatory Post-Loss Cooldown
+  // Loss closed 10 minutes ago, cooldown is 30 minutes
+  const cooldownEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'TCL', entryDate: '2026-10-05T13:40:00.000Z', exitDate: '2026-10-05T13:50:00.000Z', netPnL: -100, rMultiple: -1.0, source: 'PERSONAL' }
+    ],
+    tradingPlan: { maxDailyTrades: 5, maxDailyLossR: 3.0 },
+    contract: { cooldownMinutes: 30 },
+    currentTime: fixedNow
+  });
+  assertEquals(cooldownEval.standDownStatus, STAND_DOWN_STATUSES.COOLDOWN_ACTIVE, 'Recent loss triggers COOLDOWN_ACTIVE');
+  assertEquals(cooldownEval.isTradingAllowed, false, 'Trading paused during mandatory cooldown');
+  assert(cooldownEval.remainingCooldownSeconds > 0, 'Remaining cooldown seconds calculated');
+  assert(cooldownEval.headline.includes('MANDATORY COOLDOWN ACTIVE'), 'Cooldown headline displayed');
+
+  // 6f. Inter-Trade Pacing Pause (preventing rapid-fire entries)
+  // Win closed 5 minutes ago, pacing interval is 15 minutes
+  const pacingEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'TP', entryDate: '2026-10-05T13:50:00.000Z', exitDate: '2026-10-05T13:55:00.000Z', netPnL: 100, rMultiple: 1.0, source: 'PERSONAL' }
+    ],
+    tradingPlan: { maxDailyTrades: 5, maxDailyLossR: 3.0 },
+    currentTime: fixedNow,
+    minPacingMinutes: 15
+  });
+  assertEquals(pacingEval.standDownStatus, STAND_DOWN_STATUSES.PACING_PAUSE, 'Recent close triggers PACING_PAUSE');
+  assertEquals(pacingEval.isTradingAllowed, false, 'Trading paused during cognitive reset pacing window');
+  assertEquals(pacingEval.pacingMinutesRemaining, 10, 'Calculates 10 minutes remaining in pacing window');
+
+  // 6g. Sample Trades Exclusion in Session Limits
+  const sampleSessionEval = evaluateSessionLimitsAndPause({
+    trades: [
+      { id: 'SAMPLE-1', entryDate: '2026-10-05T09:30:00.000Z', exitDate: '2026-10-05T10:00:00.000Z', netPnL: -500, rMultiple: -5.0, source: 'SAMPLE' },
+      { id: 'SAMPLE-2', entryDate: '2026-10-05T10:30:00.000Z', exitDate: '2026-10-05T11:00:00.000Z', netPnL: -500, rMultiple: -5.0, source: 'SAMPLE' },
+      { id: 'SAMPLE-3', entryDate: '2026-10-05T11:30:00.000Z', exitDate: '2026-10-05T12:00:00.000Z', netPnL: -500, rMultiple: -5.0, source: 'SAMPLE' }
+    ],
+    tradingPlan: { maxDailyTrades: 3, maxDailyLossR: 2.0 },
+    currentTime: fixedNow
+  });
+  assertEquals(sampleSessionEval.todayTradesCount, 0, 'Sample trades are excluded from trader daily session calculations');
+  assertEquals(sampleSessionEval.standDownStatus, STAND_DOWN_STATUSES.OPEN, 'Sample trades do not consume trader daily limits');
+
+  // 7. Anti-Pressure and Reflection Prompts
+  assert(cleanEval.reflectionPrompts.length >= 3, 'Reflection prompts provided to cultivate deliberate pause');
+  assert(cleanEval.antiPressurePhilosophy.includes('zero gamification'), 'Anti-pressure philosophy explicit in session status');
 }
 
 console.log('\n================================================================');

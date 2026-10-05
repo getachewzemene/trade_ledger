@@ -42,6 +42,9 @@
       <div id="header-gatekeeper-badge" class="rubber-stamp stamp-clean" style="cursor: pointer;" title="Click to view Pre-Session Audit">PRE-SESSION: READY ✓</div>
       <div id="header-propfirm-badge" class="rubber-stamp stamp-neutral" style="cursor: pointer;" title="Click to open Prop Firm Guardian">PROP: TOPSTEP 50K | +,600 (3.2R)</div>
       <div id="header-playbook-badge" class="rubber-stamp stamp-clean" style="cursor: pointer;" title="Click to open Playbook Studio">PLAYBOOK PURITY: 88% 🎯</div>
+      <div id="header-pause-badge" class="rubber-stamp stamp-clean" style="cursor: pointer;" title="Deliberate Review-and-Pause Status">LIMITS: NORMAL ✓</div>
+      <button id="btn-open-preentry-modal" class="btn btn-secondary" title="Record plan before pulling the trigger">📝 Plan Trade (Pre-Entry)</button>
+      <button id="btn-open-missed-modal" class="btn btn-secondary" title="Document missed setups and celebrate restraint">🎯 Missed Setup</button>
       <button id="btn-tilt-status" class="rubber-stamp stamp-clean" style="cursor: pointer; display: none;" title="Active Cooldown Shield">COOLDOWN SHIELD 🛡️</button>
       <button id="btn-open-modal" class="btn btn-primary">+ Log Trade</button>
       <button id="btn-open-report" class="btn btn-secondary">Quick Report</button>
@@ -55,6 +58,23 @@
     <div id="dashboard-mode-banner" class="dashboard-mode-banner">
       <span class="badge-source-verified">VERIFIED PERFORMANCE</span>
       <span>Dashboard reports reflect your <strong>Personal &amp; Imported</strong> trades. Sample examples and simulated practice trades are excluded by default.</span>
+    </div>
+
+    <!-- Deliberate Pause & Session Stand-Down Shield Banner -->
+    <div id="session-standdown-banner" class="card" style="display: none; margin-bottom: 1rem; border: 2px solid var(--accent-brass); background: #FFF9F2; padding: 1rem 1.25rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span class="rubber-stamp stamp-danger" id="standdown-stamp">TERMINAL STAND-DOWN</span>
+          <h4 id="standdown-headline" style="font-family: var(--font-serif); font-size: 1.15rem; margin: 0; color: var(--ink-primary);">Personal Limit Reached</h4>
+        </div>
+        <span id="standdown-timer-pill" class="badge-source-personal" style="font-family: var(--font-mono); font-size: 0.8rem;">COGNITIVE PAUSE ACTIVE</span>
+      </div>
+      <p id="standdown-message" style="font-size: 0.85rem; line-height: 1.5; color: var(--ink-primary); margin: 0.5rem 0;">
+        You have reached your daily limits. Close your broker charts and walk away.
+      </p>
+      <div id="standdown-actions" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--ink-secondary);">
+        <!-- Populated via JS -->
+      </div>
     </div>
     <div class="summary-grid">
       <div class="summary-card">
@@ -120,6 +140,16 @@
             <option value="ALL">All Sources</option>
           </select>
         </div>
+      </div>
+
+      <!-- Pre-Entry Commitment Shelf (Friction Against Impulsive Execution) -->
+      <div id="preentry-plans-container" style="display: none; margin-bottom: 1.25rem;">
+        <!-- Populated via JS -->
+      </div>
+
+      <!-- Missed Setups & Restraint Summary Shelf -->
+      <div id="missed-setups-container" style="display: none; margin-bottom: 1.25rem;">
+        <!-- Populated via JS -->
       </div>
 
       <div id="trade-source-banner" class="trade-source-banner" role="status" aria-live="polite"></div>
@@ -2005,6 +2035,187 @@
         <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
           <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancel</button>
           <button type="submit" class="btn btn-primary">Record in Ledger</button>
+        </div>
+      </form>
+    </div>
+  <!-- Pre-Entry Plan Commitment Modal (Friction-by-Design Against Impulsive Execution) -->
+  <div id="preentry-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 680px;">
+      <div class="modal-header">
+        <div>
+          <h2>Pre-Entry Commitment: Record Plan Before Entry</h2>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted);">Deliberate pause to prevent impulsivity. Commit to your plan before pulling the trigger.</span>
+        </div>
+        <button id="btn-close-preentry-modal" class="close-btn">&times;</button>
+      </div>
+
+      <div style="background: var(--ledger-paper-subtle); border-left: 4px solid var(--accent-brass); padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.25rem; font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.5;">
+        <strong style="color: var(--ink-primary); font-family: var(--font-serif);">Pre-Commitment Principle:</strong>
+        Professional traders do not enter on impulse. By documenting your entry price, invalidation stop, and target in advance, you eliminate FOMO and preserve mental bandwidth.
+      </div>
+
+      <form id="form-preentry">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Symbol / Instrument</label>
+            <input type="text" id="form-plan-symbol" class="form-control" placeholder="e.g. ES, NQ, EURUSD" required style="text-transform: uppercase;">
+          </div>
+
+          <div class="form-group">
+            <label>Direction</label>
+            <select id="form-plan-direction" class="form-control">
+              <option value="LONG">LONG (Buy)</option>
+              <option value="SHORT">SHORT (Sell)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Playbook Setup</label>
+            <select id="form-plan-setup" class="form-control">
+              <option value="BREAKOUT_RETEST">Breakout &amp; Retest</option>
+              <option value="LIQUIDITY_SWEEP">Liquidity Sweep / Reversal</option>
+              <option value="TREND_PULLBACK">Trend Pullback (EMA Tap)</option>
+              <option value="DISCRETIONARY">Discretionary Setup</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Planned Risk ($ Amount)</label>
+            <input type="number" step="any" id="form-plan-risk" class="form-control" value="100" required>
+          </div>
+
+          <div class="form-group">
+            <label>Planned Entry Price</label>
+            <input type="number" step="any" id="form-plan-entry" class="form-control" placeholder="0.00" required>
+          </div>
+
+          <div class="form-group">
+            <label>Planned Invalidation (Stop Loss)</label>
+            <input type="number" step="any" id="form-plan-stop" class="form-control" placeholder="0.00" required>
+          </div>
+
+          <div class="form-group full">
+            <label>Planned Target (Take Profit)</label>
+            <input type="number" step="any" id="form-plan-target" class="form-control" placeholder="0.00" required>
+          </div>
+        </div>
+
+        <!-- Live Plan Geometry Preview -->
+        <div class="card" id="plan-geometry-preview" style="background: var(--ledger-paper-base); border: 1px solid var(--accent-brass); margin-top: 0.75rem; padding: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-secondary);">Risk/Reward Ratio:</span>
+            <strong id="plan-preview-rr" style="font-family: var(--font-mono); font-size: 1.1rem; color: var(--ledger-profit); margin-left: 0.5rem;">-- : 1</strong>
+          </div>
+          <div>
+            <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-secondary);">Stop Distance:</span>
+            <strong id="plan-preview-dist" style="font-family: var(--font-mono); font-size: 0.95rem; margin-left: 0.5rem;">--</strong>
+          </div>
+        </div>
+
+        <div class="form-group full" style="margin-top: 1rem;">
+          <label>Setup Rationale / Confluence Factors</label>
+          <textarea id="form-plan-thesis" class="form-control" rows="2" placeholder="Why does this setup qualify? Higher timeframe trend, key level, rejection trigger..."></textarea>
+        </div>
+
+        <!-- Pre-Entry Mental Gate -->
+        <div class="card" style="background: #FFF; border: 1px solid var(--ledger-paper-border); margin-top: 1rem; padding: 0.75rem;">
+          <strong style="font-family: var(--font-serif); font-size: 0.95rem; color: var(--ink-primary); display: block; margin-bottom: 0.5rem;">Pre-Entry Emotional &amp; Discipline Gate:</strong>
+          <div style="display: grid; gap: 0.5rem; font-size: 0.82rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="checkbox" id="plan-check-calm" checked>
+              <span><strong>Emotional Detachment:</strong> I am calm and detached; I have zero urge to gamble or revenge trade.</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="checkbox" id="plan-check-trigger" checked>
+              <span><strong>Trigger Confirmation:</strong> I have waited for my setup trigger to confirm; I am not chasing or front-running.</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="checkbox" id="plan-check-accept" checked>
+              <span><strong>1R Loss Acceptance:</strong> If this trade stops out, I will accept it calmly as a routine cost of doing business.</span>
+            </label>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem;">
+          <button type="button" id="btn-cancel-preentry" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Pre-Entry Commitment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Missed Setup & Passed Opportunity Modal -->
+  <div id="missed-setup-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 620px;">
+      <div class="modal-header">
+        <div>
+          <h2>Document Missed Setup / Passed Opportunity</h2>
+          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--ink-muted);">Celebrate restraint and cure FOMO. Passing a trade costs $0.</span>
+        </div>
+        <button id="btn-close-missed-modal" class="close-btn">&times;</button>
+      </div>
+
+      <div style="background: var(--ledger-paper-subtle); border-left: 4px solid var(--accent-brass); padding: 0.75rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1.25rem; font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.5;">
+        <strong style="color: var(--ink-primary); font-family: var(--font-serif);">Restraint Principle:</strong>
+        Missing a move is a non-event in trading. Documenting passed moves trains the mind that opportunities are abundant and chasing is unnecessary.
+      </div>
+
+      <form id="form-missed-setup">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Symbol</label>
+            <input type="text" id="form-missed-symbol" class="form-control" placeholder="e.g. ES, NQ" required style="text-transform: uppercase;">
+          </div>
+
+          <div class="form-group">
+            <label>Direction</label>
+            <select id="form-missed-direction" class="form-control">
+              <option value="LONG">LONG</option>
+              <option value="SHORT">SHORT</option>
+            </select>
+          </div>
+
+          <div class="form-group full">
+            <label>Playbook Setup</label>
+            <select id="form-missed-setup-id" class="form-control">
+              <option value="BREAKOUT_RETEST">Breakout &amp; Retest</option>
+              <option value="LIQUIDITY_SWEEP">Liquidity Sweep / Reversal</option>
+              <option value="TREND_PULLBACK">Trend Pullback (EMA Tap)</option>
+              <option value="DISCRETIONARY">Discretionary Setup</option>
+            </select>
+          </div>
+
+          <div class="form-group full">
+            <label>Reason Setup Was Passed / Missed</label>
+            <select id="form-missed-reason" class="form-control">
+              <option value="INTENTIONAL_LIMIT_STAND_DOWN">Intentional Stand-Down (Personal Limits Reached) [DISCIPLINE WIN ✓]</option>
+              <option value="CHASED_RUNAWAY_DID_NOT_CHASE">Resisted Chasing (Price Ran Away Without Entry) [DISCIPLINE WIN ✓]</option>
+              <option value="OFF_PLAN_FILTER">Passed Unqualified / Low Confluence Setup [DISCIPLINE WIN ✓]</option>
+              <option value="SPREAD_SLIPPAGE_TOO_HIGH">Excessive Friction / Volatility Spread [DISCIPLINE WIN ✓]</option>
+              <option value="HESITATED_FEAR">Hesitated / Fear of Losing [REFLECTION]</option>
+              <option value="NOT_AT_DESK">Away from Desk / Off-Hours [NEUTRAL]</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Hypothetical Move (R-Multiple, optional)</label>
+            <input type="number" step="any" id="form-missed-hypo-r" class="form-control" placeholder="e.g. 2.0">
+          </div>
+
+          <div class="form-group">
+            <label>Date / Time</label>
+            <input type="datetime-local" id="form-missed-date" class="form-control">
+          </div>
+
+          <div class="form-group full">
+            <label>Trader Reflection / Mindset Notes</label>
+            <textarea id="form-missed-reflection" class="form-control" rows="2" placeholder="e.g. I respected my daily limit and walked away. No FOMO. Capital is safe."></textarea>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem;">
+          <button type="button" id="btn-cancel-missed" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">Record Missed Setup</button>
         </div>
       </form>
     </div>

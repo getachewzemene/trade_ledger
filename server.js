@@ -43,6 +43,16 @@ import {
 } from './src/engine/research-lab.js';
 import { evaluateExecutionQuality, compareExecutionCohorts, classifyProcessOutcome } from './src/engine/execution-quality.js';
 import { generateTraderHistoryObservations } from './src/engine/trader-review.js';
+import { DEFAULT_TRADING_PLAN } from './src/engine/trading-plan.js';
+import {
+  createPreEntryPlan,
+  linkPlanToExecutedTrade,
+  createMissedSetup,
+  analyzeMissedSetups,
+  documentRuleViolationRecord,
+  evaluateSessionLimitsAndPause,
+  DELIBERATE_PAUSE_PRINCIPLES
+} from './src/engine/deliberate-pause.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -131,6 +141,16 @@ try {
 } catch (err) {
   console.warn('Using default prop firm config.');
 }
+
+// Load deliberate review-and-pause & pre-entry states
+let preEntryPlans = readJsonFile('planned-trades.json', []);
+let missedSetups = readJsonFile('missed-setups.json', []);
+let documentedViolations = readJsonFile('documented-violations.json', []);
+let tradingPlan = { ...DEFAULT_TRADING_PLAN, ...readJsonFile('plan.json', DEFAULT_TRADING_PLAN) };
+
+const persistPreEntryPlans = () => writeJsonFile('planned-trades.json', preEntryPlans);
+const persistMissedSetups = () => writeJsonFile('missed-setups.json', missedSetups);
+const persistDocumentedViolations = () => writeJsonFile('documented-violations.json', documentedViolations);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -252,6 +272,15 @@ const server = http.createServer((req, res) => {
           safeTrade.violations.push('CONTRACT_BREACH');
         }
         
+        if (payload.planId) {
+          const plan = preEntryPlans.find(p => p.id === payload.planId);
+          if (plan) {
+            plan.status = 'EXECUTED';
+            safeTrade = linkPlanToExecutedTrade(plan, safeTrade);
+            persistPreEntryPlans();
+          }
+        }
+
         safeTrade.executionQuality = evaluateExecutionQuality(safeTrade);
         safeTrade.processOutcome = classifyProcessOutcome(safeTrade);
 
@@ -259,8 +288,15 @@ const server = http.createServer((req, res) => {
         activeTrades.push(safeTrade);
         persistTrades();
 
+        const pauseStatus = evaluateSessionLimitsAndPause({
+          trades: getPerformanceTrades(),
+          tradingPlan,
+          contract: tradingContract,
+          preSessionLogs
+        });
+
         res.writeHead(201, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Trade recorded successfully', trade: safeTrade, circuit }));
+        res.end(JSON.stringify({ message: 'Trade recorded successfully', trade: safeTrade, circuit, pauseStatus }));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
@@ -301,6 +337,122 @@ const server = http.createServer((req, res) => {
     const quality = compareExecutionCohorts(analyzed);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(quality));
+    return;
+  }
+
+  // GET /api/pause/status
+  if (pathname === '/api/pause/status' && req.method === 'GET') {
+    const status = evaluateSessionLimitsAndPause({
+      trades: getPerformanceTrades(),
+      tradingPlan,
+      contract: tradingContract,
+      preSessionLogs
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(status));
+    return;
+  }
+
+  // GET & POST /api/plans/pre-entry
+  if (pathname === '/api/plans/pre-entry') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ plans: preEntryPlans }));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body);
+          const result = createPreEntryPlan(payload);
+          if (!result.valid) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid pre-entry plan', details: result.errors }));
+            return;
+          }
+          preEntryPlans.unshift(result.plan);
+          persistPreEntryPlans();
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'Pre-entry plan recorded', plan: result.plan }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // POST /api/plans/pre-entry/cancel
+  if (pathname === '/api/plans/pre-entry/cancel' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { id } = JSON.parse(body);
+        const plan = preEntryPlans.find(p => p.id === id);
+        if (plan) {
+          plan.status = 'CANCELLED';
+          persistPreEntryPlans();
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Plan cancelled', id }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // GET & POST /api/missed-setups
+  if (pathname === '/api/missed-setups') {
+    if (req.method === 'GET') {
+      const analysis = analyzeMissedSetups(missedSetups);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(analysis));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body);
+          const record = createMissedSetup(payload);
+          missedSetups.unshift(record);
+          persistMissedSetups();
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ message: 'Missed setup documented', record, analysis: analyzeMissedSetups(missedSetups) }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // POST /api/violations/document
+  if (pathname === '/api/violations/document' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        const targetTrade = activeTrades.find(t => t.id === payload.tradeId) || { id: payload.tradeId, symbol: payload.symbol };
+        const record = documentRuleViolationRecord(targetTrade, payload);
+        documentedViolations.unshift(record);
+        persistDocumentedViolations();
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Violation documented', record }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
     return;
   }
 
